@@ -285,9 +285,85 @@ function checkInitialSetup() {
       if (response === ui.Button.YES) {
         initialSetup();
       }
+    } else {
+      // 必要なシートが存在するかチェック
+      checkRequiredSheets();
     }
   } catch (error) {
     console.error('初期セットアップチェックエラー:', error);
+  }
+}
+
+/**
+ * 必要なシートの存在確認
+ */
+function checkRequiredSheets() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const requiredSheets = [
+      SHEET_CONFIG.SALES_HISTORY,
+      SHEET_CONFIG.PRODUCT_MASTER,
+      SHEET_CONFIG.KPI_MONTHLY,
+      SHEET_CONFIG.INVENTORY
+    ];
+    
+    const missingSheets = [];
+    requiredSheets.forEach(sheetName => {
+      if (!ss.getSheetByName(sheetName)) {
+        missingSheets.push(sheetName);
+      }
+    });
+    
+    if (missingSheets.length > 0) {
+      console.log('不足しているシート:', missingSheets);
+      const ui = SpreadsheetApp.getUi();
+      const response = ui.alert(
+        '不足シートの検出',
+        `以下のシートが不足しています：\n${missingSheets.join('\n')}\n\n不足しているシートを作成しますか？`,
+        ui.ButtonSet.YES_NO
+      );
+      
+      if (response === ui.Button.YES) {
+        createMissingSheets(missingSheets);
+      }
+    }
+  } catch (error) {
+    console.error('シート確認エラー:', error);
+  }
+}
+
+/**
+ * 不足しているシートを作成
+ */
+function createMissingSheets(missingSheets) {
+  try {
+    const setupManager = new SetupManager();
+    
+    missingSheets.forEach(sheetName => {
+      console.log(`シート作成中: ${sheetName}`);
+      switch (sheetName) {
+        case SHEET_CONFIG.SALES_HISTORY:
+          setupManager.createSalesHistorySheet();
+          break;
+        case SHEET_CONFIG.PRODUCT_MASTER:
+          setupManager.createProductMasterSheet();
+          break;
+        case SHEET_CONFIG.KPI_MONTHLY:
+          setupManager.createKPIMonthlySheet();
+          break;
+        case SHEET_CONFIG.INVENTORY:
+          setupManager.createInventorySheet();
+          break;
+      }
+    });
+    
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('完了', `${missingSheets.length}個のシートを作成しました。`, ui.ButtonSet.OK);
+    
+  } catch (error) {
+    console.error('シート作成エラー:', error);
+    const ui = SpreadsheetApp.getUi();
+    ui.alert('エラー', `シート作成中にエラーが発生しました：\n${error.message}`, ui.ButtonSet.OK);
   }
 }
 

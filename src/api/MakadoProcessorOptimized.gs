@@ -35,6 +35,9 @@ class MakadoProcessorOptimized {
       // バッチ処理で保存
       const result = this.saveToSpreadsheetBatch(parsedData.records);
       
+      // SKUマッピング更新
+      this.updateSKUMapping(parsedData.records);
+      
       const duration = (new Date() - startTime) / 1000;
       console.log(`処理完了: ${duration}秒, ${result.savedCount}件`);
       
@@ -317,6 +320,26 @@ class MakadoProcessorOptimized {
   createSalesHistorySheet(spreadsheet) {
     // 既存の実装をそのまま使用
     return MakadoProcessor.prototype.createSalesHistorySheet.call(this, spreadsheet);
+  }
+
+  updateSKUMapping(records) {
+    // 既存の実装をそのまま使用
+    return MakadoProcessor.prototype.updateSKUMapping.call(this, records);
+  }
+
+  createProductMasterSheet(spreadsheet) {
+    // 既存の実装をそのまま使用
+    return MakadoProcessor.prototype.createProductMasterSheet.call(this, spreadsheet);
+  }
+
+  skuMappingExists(unifiedSku) {
+    // 既存の実装をそのまま使用
+    return MakadoProcessor.prototype.skuMappingExists.call(this, unifiedSku);
+  }
+
+  extractPurchaseDate(makadoSku) {
+    // 既存の実装をそのまま使用
+    return MakadoProcessor.prototype.extractPurchaseDate.call(this, makadoSku);
   }
 }
 
