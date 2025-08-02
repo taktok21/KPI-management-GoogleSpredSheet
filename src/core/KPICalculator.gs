@@ -22,30 +22,48 @@ class KPICalculator {
     try {
       const startTime = new Date();
       
+      console.log('KPI計算を開始します...');
+      
       // 基本データ取得
+      console.log('販売データを取得中...');
       const salesData = this.getSalesData();
+      console.log(`販売データ取得完了: ${salesData.length}件`);
+      
+      console.log('在庫データを取得中...');
       const inventoryData = this.getInventoryData();
+      console.log(`在庫データ取得完了: ${inventoryData.length}件`);
+      
+      console.log('仕入データを取得中...');
       const purchaseData = this.getPurchaseData();
+      console.log(`仕入データ取得完了: ${purchaseData.length}件`);
       
       // 月次KPI計算
+      console.log('月次KPI計算中...');
       const monthlyKPIs = this.calculateMonthlyKPIs(salesData, inventoryData, purchaseData);
       
       // 日次KPI計算
+      console.log('日次KPI計算中...');
       const dailyKPIs = this.calculateDailyKPIs(salesData);
       
       // 商品別KPI計算
+      console.log('商品別KPI計算中...');
       const productKPIs = this.calculateProductKPIs(salesData, inventoryData);
       
       // KPIダッシュボード更新
+      console.log('KPIダッシュボード更新中...');
       this.updateKPIDashboard(monthlyKPIs, dailyKPIs);
       
       // 在庫分析更新
+      console.log('在庫分析更新中...');
       this.updateInventoryAnalysis(inventoryData, productKPIs);
       
       // アラートチェック
+      console.log('アラートチェック中...');
       const alerts = this.checkKPIAlerts(monthlyKPIs, dailyKPIs);
       
       const duration = (new Date() - startTime) / 1000;
+      
+      console.log(`KPI計算完了: ${duration}秒, アラート: ${alerts.length}件`);
       
       return {
         success: true,
@@ -57,6 +75,7 @@ class KPICalculator {
       };
 
     } catch (error) {
+      console.error('KPI計算でエラーが発生:', error);
       ErrorHandler.handleError(error, 'KPICalculator.recalculateAll');
       throw error;
     }
@@ -123,13 +142,6 @@ class KPICalculator {
    * 在庫データ取得
    */
   getInventoryData() {
-    const cacheKey = 'inventory_data';
-    const cached = this.cache.get(cacheKey);
-    
-    if (cached) {
-      return cached;
-    }
-
     try {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const inventorySheet = ss.getSheetByName(SHEET_CONFIG.INVENTORY);
@@ -150,8 +162,6 @@ class KPICalculator {
         .filter(row => row[0]) // SKUがある行のみ
         .map(row => this.mapInventoryRecord(row));
 
-      this.cache.set(cacheKey, inventoryData, 600); // 10分間キャッシュ
-      
       return inventoryData;
 
     } catch (error) {
@@ -180,8 +190,8 @@ class KPICalculator {
       const range = purchaseSheet.getRange(2, 1, lastRow - 1, purchaseSheet.getLastColumn());
       const rawData = range.getValues();
       
-      return rawData
-        .filter(row => row[0]) // SKUがある行のみ
+      const purchaseData = rawData
+        .filter(row => row[0]) // データがある行のみ
         .map(row => this.mapPurchaseRecord(row))
         .filter(record => {
           if (!startDate && !endDate) return true;
@@ -192,6 +202,8 @@ class KPICalculator {
           
           return true;
         });
+
+      return purchaseData;
 
     } catch (error) {
       ErrorHandler.handleError(error, 'KPICalculator.getPurchaseData');
@@ -204,7 +216,7 @@ class KPICalculator {
   // =============================================================================
 
   /**
-   * 販売レコードマッピング
+   * 販売レコードをマッピング
    */
   mapSalesRecord(row) {
     return {
@@ -224,46 +236,51 @@ class KPICalculator {
       profit_margin: NumberUtils.safeNumber(row[13]),
       status: row[14],
       fulfillment: row[15],
-      data_source: row[16]
+      data_source: row[16],
+      import_timestamp: new Date(row[17])
     };
   }
 
   /**
-   * 在庫レコードマッピング
+   * 在庫レコードをマッピング
    */
   mapInventoryRecord(row) {
     return {
       unified_sku: row[0],
       asin: row[1],
       product_name: row[2],
-      quantity: NumberUtils.safeInteger(row[3]),
-      unit_cost: NumberUtils.safeNumber(row[4]),
-      total_cost: NumberUtils.safeNumber(row[5]),
-      location: row[6],
-      last_inbound_date: row[7] ? new Date(row[7]) : null,
-      last_sold_date: row[8] ? new Date(row[8]) : null,
-      days_in_stock: NumberUtils.safeInteger(row[9])
+      current_stock: NumberUtils.safeInteger(row[3]),
+      purchase_cost: NumberUtils.safeNumber(row[4]),
+      inventory_value: NumberUtils.safeNumber(row[5]),
+      last_sold_date: row[6] ? new Date(row[6]) : null,
+      days_in_stock: NumberUtils.safeInteger(row[7]),
+      stock_status: row[8],
+      reorder_point: NumberUtils.safeInteger(row[9]),
+      updated_at: new Date(row[10])
     };
   }
 
   /**
-   * 仕入レコードマッピング
+   * 仕入レコードをマッピング
    */
   mapPurchaseRecord(row) {
     return {
-      unified_sku: row[0],
+      purchase_date: new Date(row[0]),
       asin: row[1],
-      purchase_date: new Date(row[2]),
-      supplier: row[3],
+      unified_sku: row[2],
+      product_name: row[3],
       quantity: NumberUtils.safeInteger(row[4]),
       unit_cost: NumberUtils.safeNumber(row[5]),
       total_cost: NumberUtils.safeNumber(row[6]),
-      shipping_cost: NumberUtils.safeNumber(row[7])
+      supplier: row[7],
+      purchase_order: row[8],
+      status: row[9],
+      notes: row[10]
     };
   }
 
   // =============================================================================
-  // 月次KPI計算
+  // KPI計算
   // =============================================================================
 
   /**
@@ -288,19 +305,17 @@ class KPICalculator {
     const totalPurchaseAmount = ArrayUtils.sum(monthlyPurchases, purchase => purchase.total_cost);
 
     // 在庫KPI
-    const totalInventoryValue = ArrayUtils.sum(inventoryData, inv => inv.total_cost);
+    const totalInventoryValue = ArrayUtils.sum(inventoryData, inv => inv.inventory_value);
     const averageInventoryValue = this.calculateAverageInventoryValue(inventoryData);
 
     // 計算KPI
     const profitMargin = NumberUtils.percentage(totalGrossProfit, totalRevenue);
     const roi = NumberUtils.percentage(totalGrossProfit, totalPurchaseAmount);
     const inventoryTurnover = NumberUtils.calculateTurnoverRate(totalRevenue, averageInventoryValue);
-    const turnoverDays = NumberUtils.calculateTurnoverDays(inventoryTurnover, 30);
 
     // 商品分析
     const uniqueASINs = ArrayUtils.unique(monthlySales, sale => sale.asin).length;
-    const averageOrderValue = totalQuantity > 0 ? totalRevenue / monthlySales.length : 0;
-    const averageSellingPrice = totalQuantity > 0 ? totalRevenue / totalQuantity : 0;
+    const averageOrderValue = monthlySales.length > 0 ? totalRevenue / monthlySales.length : 0;
 
     // 在庫分析
     const stagnantInventory = this.calculateStagnantInventory(inventoryData);
@@ -311,247 +326,77 @@ class KPICalculator {
     const profitGoalAchievement = NumberUtils.percentage(totalGrossProfit, kpiSettings.targetMonthlyProfit);
 
     return {
-      period: {
-        start: currentMonth.start,
-        end: currentMonth.end,
-        year: currentMonth.start.getFullYear(),
-        month: currentMonth.start.getMonth() + 1
-      },
-      
-      // 売上・利益KPI
-      totalRevenue: totalRevenue,
-      totalGrossProfit: totalGrossProfit,
+      revenue: totalRevenue,
+      grossProfit: totalGrossProfit,
       profitMargin: profitMargin,
       roi: roi,
-      profitGoalAchievement: profitGoalAchievement,
-      
-      // 販売KPI
-      totalQuantity: totalQuantity,
-      salesCount: monthlySales.length,
-      uniqueASINs: uniqueASINs,
-      averageOrderValue: averageOrderValue,
-      averageSellingPrice: averageSellingPrice,
-      
-      // 在庫KPI
-      totalInventoryValue: totalInventoryValue,
-      averageInventoryValue: averageInventoryValue,
+      salesQuantity: totalQuantity,
+      inventoryValue: totalInventoryValue,
       inventoryTurnover: inventoryTurnover,
-      turnoverDays: turnoverDays,
-      stagnantInventoryValue: stagnantInventory.value,
+      uniqueProducts: uniqueASINs,
+      averageOrderValue: averageOrderValue,
       stagnantInventoryRate: stagnantInventory.rate,
-      lowStockItemsCount: lowStockItems.count,
-      
-      // 仕入KPI
-      totalPurchaseAmount: totalPurchaseAmount,
-      purchaseCount: monthlyPurchases.length,
-      averagePurchaseAmount: monthlyPurchases.length > 0 ? totalPurchaseAmount / monthlyPurchases.length : 0,
-      
-      // 効率性KPI
-      grossProfitPerOrder: monthlySales.length > 0 ? totalGrossProfit / monthlySales.length : 0,
-      revenuePerASIN: uniqueASINs > 0 ? totalRevenue / uniqueASINs : 0,
-      
+      lowStockItemsCount: lowStockItems.length,
+      profitGoalAchievement: profitGoalAchievement,
+      month: DateUtils.formatDate(currentMonth.start, 'yyyy-MM'),
       calculatedAt: new Date()
     };
   }
-
-  // =============================================================================
-  // 日次KPI計算
-  // =============================================================================
 
   /**
    * 日次KPI計算
    */
   calculateDailyKPIs(salesData) {
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
-
-    // 今日のデータ
+    const today = DateUtils.getToday();
     const todaySales = salesData.filter(sale => 
-      sale.order_date >= todayStart && sale.order_date <= todayEnd
+      DateUtils.isSameDay(sale.order_date, today)
     );
 
-    // 過去7日間の平均
-    const weekAgo = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const last7Days = DateUtils.getLast7Days();
     const weekSales = salesData.filter(sale => 
-      sale.order_date >= weekAgo && sale.order_date < todayStart
+      sale.order_date >= last7Days.start && sale.order_date <= last7Days.end
     );
-
-    const todayRevenue = ArrayUtils.sum(todaySales, sale => sale.total_amount);
-    const todayProfit = ArrayUtils.sum(todaySales, sale => sale.gross_profit);
-    const todayQuantity = ArrayUtils.sum(todaySales, sale => sale.quantity);
-
-    const weeklyAverageRevenue = weekSales.length > 0 ? ArrayUtils.sum(weekSales, sale => sale.total_amount) / 7 : 0;
-    const weeklyAverageProfit = weekSales.length > 0 ? ArrayUtils.sum(weekSales, sale => sale.gross_profit) / 7 : 0;
-
-    // 目標売上（月利80万円を30日で割った値）
-    const dailyRevenueTarget = 800000 / 30 * (100 / 25); // 利益率25%前提
 
     return {
-      date: today,
-      
-      // 今日の実績
-      todayRevenue: todayRevenue,
-      todayProfit: todayProfit,
-      todayQuantity: todayQuantity,
-      todayOrderCount: todaySales.length,
-      
-      // 平均比較
-      weeklyAverageRevenue: weeklyAverageRevenue,
-      weeklyAverageProfit: weeklyAverageProfit,
-      revenueGrowthRate: weeklyAverageRevenue > 0 ? NumberUtils.percentage(todayRevenue - weeklyAverageRevenue, weeklyAverageRevenue) : 0,
-      
-      // 目標比較
-      dailyRevenueTarget: dailyRevenueTarget,
-      dailyRevenueAchievement: NumberUtils.percentage(todayRevenue, dailyRevenueTarget),
-      
+      todayRevenue: ArrayUtils.sum(todaySales, sale => sale.total_amount),
+      todayProfit: ArrayUtils.sum(todaySales, sale => sale.gross_profit),
+      todayOrders: todaySales.length,
+      todaySalesCount: ArrayUtils.sum(todaySales, sale => sale.quantity),
+      weeklyAvgRevenue: ArrayUtils.average(weekSales, sale => sale.total_amount) * 7,
+      weeklyAvgProfit: ArrayUtils.average(weekSales, sale => sale.gross_profit) * 7,
+      growthRate: this.calculateGrowthRate(todaySales, weekSales),
       calculatedAt: new Date()
     };
   }
-
-  // =============================================================================
-  // 商品別KPI計算
-  // =============================================================================
 
   /**
    * 商品別KPI計算
    */
   calculateProductKPIs(salesData, inventoryData) {
-    const productMetrics = {};
-    
-    // 販売データを商品別に集計
-    salesData.forEach(sale => {
-      const sku = sale.unified_sku;
+    const productSales = ArrayUtils.groupBy(salesData, sale => sale.asin);
+    const productKPIs = [];
+
+    Object.keys(productSales).forEach(asin => {
+      const sales = productSales[asin];
+      const inventory = inventoryData.find(inv => inv.asin === asin);
       
-      if (!productMetrics[sku]) {
-        productMetrics[sku] = {
-          unified_sku: sku,
-          asin: sale.asin,
-          product_name: sale.product_name,
-          totalRevenue: 0,
-          totalProfit: 0,
-          totalQuantity: 0,
-          salesCount: 0,
-          firstSaleDate: sale.order_date,
-          lastSaleDate: sale.order_date,
-          averageSellingPrice: 0,
-          profitMargin: 0
-        };
-      }
-      
-      const metrics = productMetrics[sku];
-      metrics.totalRevenue += sale.total_amount;
-      metrics.totalProfit += sale.gross_profit;
-      metrics.totalQuantity += sale.quantity;
-      metrics.salesCount += 1;
-      
-      if (sale.order_date < metrics.firstSaleDate) {
-        metrics.firstSaleDate = sale.order_date;
-      }
-      if (sale.order_date > metrics.lastSaleDate) {
-        metrics.lastSaleDate = sale.order_date;
-      }
+      const totalRevenue = ArrayUtils.sum(sales, sale => sale.total_amount);
+      const totalProfit = ArrayUtils.sum(sales, sale => sale.gross_profit);
+      const totalQuantity = ArrayUtils.sum(sales, sale => sale.quantity);
+
+      productKPIs.push({
+        asin: asin,
+        productName: sales[0].product_name,
+        revenue: totalRevenue,
+        profit: totalProfit,
+        quantity: totalQuantity,
+        profitMargin: NumberUtils.percentage(totalProfit, totalRevenue),
+        currentStock: inventory ? inventory.current_stock : 0,
+        performance: this.calculateProductPerformance(totalRevenue, totalProfit, totalQuantity)
+      });
     });
 
-    // 在庫情報をマージして完成
-    Object.keys(productMetrics).forEach(sku => {
-      const metrics = productMetrics[sku];
-      const inventory = inventoryData.find(inv => inv.unified_sku === sku);
-      
-      // 計算KPI
-      metrics.averageSellingPrice = metrics.totalQuantity > 0 ? metrics.totalRevenue / metrics.totalQuantity : 0;
-      metrics.profitMargin = metrics.totalRevenue > 0 ? NumberUtils.percentage(metrics.totalProfit, metrics.totalRevenue) : 0;
-      
-      // 販売ベロシティ
-      if (metrics.firstSaleDate && metrics.lastSaleDate) {
-        const salesDays = DateUtils.daysBetween(metrics.firstSaleDate, metrics.lastSaleDate) || 1;
-        metrics.dailySalesVelocity = metrics.totalQuantity / salesDays;
-      } else {
-        metrics.dailySalesVelocity = 0;
-      }
-      
-      // 在庫情報
-      if (inventory) {
-        metrics.currentStock = inventory.quantity;
-        metrics.stockValue = inventory.total_cost;
-        metrics.daysInStock = inventory.days_in_stock;
-        
-        // 在庫切れ予測
-        if (metrics.dailySalesVelocity > 0) {
-          metrics.stockoutDays = Math.floor(inventory.quantity / metrics.dailySalesVelocity);
-        } else {
-          metrics.stockoutDays = Infinity;
-        }
-        
-        // 在庫回転
-        if (inventory.total_cost > 0) {
-          metrics.inventoryTurnover = metrics.totalRevenue / inventory.total_cost;
-        } else {
-          metrics.inventoryTurnover = 0;
-        }
-      } else {
-        metrics.currentStock = 0;
-        metrics.stockValue = 0;
-        metrics.daysInStock = 0;
-        metrics.stockoutDays = 0;
-        metrics.inventoryTurnover = 0;
-      }
-    });
-
-    return Object.values(productMetrics);
-  }
-
-  // =============================================================================
-  // 特殊計算
-  // =============================================================================
-
-  /**
-   * 平均在庫価値計算
-   */
-  calculateAverageInventoryValue(inventoryData) {
-    // 簡易版：現在の在庫価値を返す
-    // 実際は過去数ヶ月の平均を計算すべき
-    return ArrayUtils.sum(inventoryData, inv => inv.total_cost);
-  }
-
-  /**
-   * 滞留在庫計算
-   */
-  calculateStagnantInventory(inventoryData) {
-    const stagnantThreshold = this.config.getKPISettings().stagnantDaysThreshold;
-    
-    const stagnantItems = inventoryData.filter(inv => 
-      inv.days_in_stock > stagnantThreshold
-    );
-    
-    const stagnantValue = ArrayUtils.sum(stagnantItems, inv => inv.total_cost);
-    const totalValue = ArrayUtils.sum(inventoryData, inv => inv.total_cost);
-    
-    return {
-      count: stagnantItems.length,
-      value: stagnantValue,
-      rate: totalValue > 0 ? NumberUtils.percentage(stagnantValue, totalValue) : 0
-    };
-  }
-
-  /**
-   * 低在庫商品計算
-   */
-  calculateLowStockItems(inventoryData) {
-    const lowStockThreshold = this.config.getKPISettings().lowStockThreshold;
-    
-    const lowStockItems = inventoryData.filter(inv => 
-      inv.quantity > 0 && inv.quantity <= lowStockThreshold
-    );
-    
-    return {
-      count: lowStockItems.length,
-      items: lowStockItems.map(inv => ({
-        sku: inv.unified_sku,
-        product_name: inv.product_name,
-        quantity: inv.quantity
-      }))
-    };
+    return productKPIs.sort((a, b) => b.revenue - a.revenue);
   }
 
   // =============================================================================
@@ -564,27 +409,79 @@ class KPICalculator {
   updateKPIDashboard(monthlyKPIs, dailyKPIs) {
     try {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
-      let dashboardSheet = ss.getSheetByName(SHEET_CONFIG.KPI_MONTHLY);
+      let kpiSheet = ss.getSheetByName(SHEET_CONFIG.KPI_MONTHLY);
       
-      if (!dashboardSheet) {
-        dashboardSheet = this.createKPIDashboard(ss);
+      if (!kpiSheet) {
+        kpiSheet = this.createKPIDashboard(ss);
       }
 
-      // 月次KPIの更新
-      this.updateMonthlySection(dashboardSheet, monthlyKPIs);
-      
-      // 日次KPIの更新
-      this.updateDailySection(dashboardSheet, dailyKPIs);
-      
-      // 目標との比較グラフ更新
-      this.updateTargetComparison(dashboardSheet, monthlyKPIs);
-      
       // 最終更新時刻
-      dashboardSheet.getRange('A1').setValue(`最終更新: ${new Date().toLocaleString('ja-JP')}`);
+      kpiSheet.getRange('G1').setValue(DateUtils.formatDate(new Date(), 'yyyy-MM-dd HH:mm:ss'));
+
+      // 月次KPI更新
+      this.updateMonthlyKPIValues(kpiSheet, monthlyKPIs);
+      
+      // 日次KPI更新
+      this.updateDailyKPIValues(kpiSheet, dailyKPIs);
+
+      console.log('KPIダッシュボード更新完了');
 
     } catch (error) {
-      ErrorHandler.handleError(error, 'KPICalculator.updateKPIDashboard');
+      console.error('KPIダッシュボード更新エラー:', error);
+      throw error;
     }
+  }
+
+  /**
+   * 月次KPI値更新
+   */
+  updateMonthlyKPIValues(sheet, kpis) {
+    const kpiSettings = this.config.getKPISettings();
+    
+    // 売上高
+    sheet.getRange('B5').setValue(kpis.revenue);
+    
+    // 粗利益
+    sheet.getRange('B6').setValue(kpis.grossProfit);
+    sheet.getRange('D6').setValue(kpis.profitGoalAchievement / 100);
+    
+    // 利益率
+    sheet.getRange('B7').setValue(kpis.profitMargin / 100);
+    
+    // ROI
+    sheet.getRange('B8').setValue(kpis.roi / 100);
+    
+    // 販売数
+    sheet.getRange('B9').setValue(kpis.salesQuantity);
+    
+    // 在庫金額
+    sheet.getRange('B10').setValue(kpis.inventoryValue);
+    
+    // 在庫回転率
+    sheet.getRange('B11').setValue(kpis.inventoryTurnover);
+    
+    // 滞留在庫率
+    sheet.getRange('B12').setValue(kpis.stagnantInventoryRate / 100);
+  }
+
+  /**
+   * 日次KPI値更新
+   */
+  updateDailyKPIValues(sheet, kpis) {
+    // 本日売上
+    sheet.getRange('B16').setValue(kpis.todayRevenue);
+    sheet.getRange('C16').setValue(kpis.weeklyAvgRevenue / 7);
+    sheet.getRange('D16').setValue(kpis.growthRate / 100);
+    
+    // 本日利益
+    sheet.getRange('B17').setValue(kpis.todayProfit);
+    sheet.getRange('C17').setValue(kpis.weeklyAvgProfit / 7);
+    
+    // 本日販売数
+    sheet.getRange('B18').setValue(kpis.todaySalesCount);
+    
+    // 本日注文数
+    sheet.getRange('B19').setValue(kpis.todayOrders);
   }
 
   /**
@@ -593,224 +490,160 @@ class KPICalculator {
   createKPIDashboard(spreadsheet) {
     const sheet = spreadsheet.insertSheet(SHEET_CONFIG.KPI_MONTHLY);
     
-    // 基本レイアウト設定
-    sheet.setColumnWidth(1, 150);
-    sheet.setColumnWidth(2, 120);
-    sheet.setColumnWidth(3, 100);
-    
-    // ヘッダー設定
-    sheet.getRange('A1').setValue('KPI管理ダッシュボード');
-    sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
+    // ヘッダー行の設定
+    sheet.getRange('A1').setValue('Amazon販売KPI管理ダッシュボード');
+    sheet.getRange('F1').setValue('最終更新: ');
     
     // 月次KPIセクション
-    sheet.getRange('A3').setValue('月次KPI');
-    sheet.getRange('A3').setFontWeight('bold').setBackground('#e1f5fe');
+    sheet.getRange('A3').setValue('📊 月次KPI');
+    sheet.getRange('A4:E4').setValues([['項目', '実績', '目標', '達成率', '前月比']]);
     
-    const monthlyLabels = [
-      '売上高', '粗利益', '利益率', 'ROI', '目標達成率',
-      '販売数', '注文数', '取扱ASIN数', '平均注文額',
-      '在庫金額', '在庫回転率', '回転日数', '滞留在庫率'
+    const monthlyItems = [
+      ['売上高', '', '3,200,000', '', ''],
+      ['粗利益', '', '800,000', '', ''],
+      ['利益率', '', '25%', '', ''],
+      ['ROI', '', '30%', '', ''],
+      ['販売数', '', '600', '', ''],
+      ['在庫金額', '', '1,000,000', '', ''],
+      ['在庫回転率', '', '1', '', ''],
+      ['滞留在庫率', '', '10%', '', '']
     ];
     
-    monthlyLabels.forEach((label, index) => {
-      sheet.getRange(4 + index, 1).setValue(label);
-    });
+    sheet.getRange('A5:E12').setValues(monthlyItems);
     
     // 日次KPIセクション
-    sheet.getRange('A18').setValue('本日の実績');
-    sheet.getRange('A18').setFontWeight('bold').setBackground('#fff3e0');
+    sheet.getRange('A14').setValue('📈 本日の実績');
+    sheet.getRange('A15:D15').setValues([['項目', '実績', '7日平均', '成長率']]);
     
-    const dailyLabels = [
-      '本日売上', '本日利益', '本日販売数', '本日注文数',
-      '7日平均売上', '売上成長率', '目標達成率'
+    const dailyItems = [
+      ['本日売上', '', '', ''],
+      ['本日利益', '', '', ''],
+      ['本日販売数', '', '', ''],
+      ['本日注文数', '', '', '']
     ];
     
-    dailyLabels.forEach((label, index) => {
-      sheet.getRange(19 + index, 1).setValue(label);
-    });
+    sheet.getRange('A16:D19').setValues(dailyItems);
+    
+    // アラートセクション
+    sheet.getRange('A21').setValue('⚠️ アラート');
+    
+    // フォーマット設定
+    sheet.getRange('A1').setFontSize(16).setFontWeight('bold');
+    sheet.getRange('A3:A21').setFontWeight('bold');
+    sheet.getRange('A4:E4').setFontWeight('bold').setBackground('#f0f0f0');
+    sheet.getRange('A15:D15').setFontWeight('bold').setBackground('#f0f0f0');
+    
+    // 金額列のフォーマット
+    sheet.getRange('B5:B12').setNumberFormat('¥#,##0');
+    sheet.getRange('C5:C12').setNumberFormat('¥#,##0');
+    sheet.getRange('B16:C19').setNumberFormat('¥#,##0');
+    
+    // パーセント列のフォーマット
+    sheet.getRange('D5:E12').setNumberFormat('0.0%');
+    sheet.getRange('D16:D19').setNumberFormat('0.0%');
     
     return sheet;
   }
 
-  /**
-   * 月次セクション更新
-   */
-  updateMonthlySection(sheet, kpis) {
-    const updates = [
-      { cell: 'B4', value: kpis.totalRevenue, format: '¥#,##0' },
-      { cell: 'B5', value: kpis.totalGrossProfit, format: '¥#,##0' },
-      { cell: 'B6', value: kpis.profitMargin / 100, format: '0.0%' },
-      { cell: 'B7', value: kpis.roi / 100, format: '0.0%' },
-      { cell: 'B8', value: kpis.profitGoalAchievement / 100, format: '0.0%' },
-      { cell: 'B9', value: kpis.totalQuantity, format: '#,##0' },
-      { cell: 'B10', value: kpis.salesCount, format: '#,##0' },
-      { cell: 'B11', value: kpis.uniqueASINs, format: '#,##0' },
-      { cell: 'B12', value: kpis.averageOrderValue, format: '¥#,##0' },
-      { cell: 'B13', value: kpis.totalInventoryValue, format: '¥#,##0' },
-      { cell: 'B14', value: kpis.inventoryTurnover, format: '0.0' },
-      { cell: 'B15', value: kpis.turnoverDays, format: '0' },
-      { cell: 'B16', value: kpis.stagnantInventoryRate / 100, format: '0.0%' }
-    ];
-    
-    updates.forEach(update => {
-      const range = sheet.getRange(update.cell);
-      range.setValue(update.value);
-      range.setNumberFormat(update.format);
-    });
-  }
-
-  /**
-   * 日次セクション更新
-   */
-  updateDailySection(sheet, kpis) {
-    const updates = [
-      { cell: 'B19', value: kpis.todayRevenue, format: '¥#,##0' },
-      { cell: 'B20', value: kpis.todayProfit, format: '¥#,##0' },
-      { cell: 'B21', value: kpis.todayQuantity, format: '#,##0' },
-      { cell: 'B22', value: kpis.todayOrderCount, format: '#,##0' },
-      { cell: 'B23', value: kpis.weeklyAverageRevenue, format: '¥#,##0' },
-      { cell: 'B24', value: kpis.revenueGrowthRate / 100, format: '0.0%' },
-      { cell: 'B25', value: kpis.dailyRevenueAchievement / 100, format: '0.0%' }
-    ];
-    
-    updates.forEach(update => {
-      const range = sheet.getRange(update.cell);
-      range.setValue(update.value);
-      range.setNumberFormat(update.format);
-    });
-  }
-
-  /**
-   * 目標比較更新
-   */
-  updateTargetComparison(sheet, kpis) {
-    // 目標値との比較表示用の条件付きフォーマット
-    const targetRanges = [
-      { range: 'B8', threshold: 1.0 }, // 利益目標達成率
-      { range: 'B6', threshold: 0.25 }, // 利益率
-      { range: 'B7', threshold: 0.30 }, // ROI
-      { range: 'B16', threshold: 0.10 } // 滞留在庫率（逆）
-    ];
-    
-    targetRanges.forEach(config => {
-      const range = sheet.getRange(config.range);
-      const value = range.getValue();
-      
-      if (config.range === 'B16') {
-        // 滞留在庫率は低い方が良い
-        if (value <= config.threshold) {
-          range.setBackground('#c8e6c9'); // 緑
-        } else {
-          range.setBackground('#ffcdd2'); // 赤
-        }
-      } else {
-        // その他は高い方が良い
-        if (value >= config.threshold) {
-          range.setBackground('#c8e6c9'); // 緑
-        } else {
-          range.setBackground('#ffcdd2'); // 赤
-        }
-      }
-    });
-  }
-
   // =============================================================================
-  // 在庫分析更新
+  // ヘルパー関数
   // =============================================================================
 
   /**
-   * 在庫分析シート更新
+   * 在庫分析更新
    */
   updateInventoryAnalysis(inventoryData, productKPIs) {
-    try {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      let inventorySheet = ss.getSheetByName(SHEET_CONFIG.INVENTORY);
-      
-      if (!inventorySheet) {
-        inventorySheet = this.createInventoryAnalysisSheet(ss);
-      }
-
-      // 商品別データマージ
-      const analysisData = this.mergeInventoryWithKPIs(inventoryData, productKPIs);
-      
-      // 在庫アラート更新
-      this.updateInventoryAlerts(inventorySheet, analysisData);
-      
-      // トップ/ワースト商品更新
-      this.updateTopWorstProducts(inventorySheet, analysisData);
-
-    } catch (error) {
-      ErrorHandler.handleError(error, 'KPICalculator.updateInventoryAnalysis');
-    }
+    console.log('在庫分析更新: 商品数', productKPIs.length);
   }
-
-  // =============================================================================
-  // アラートチェック
-  // =============================================================================
 
   /**
    * KPIアラートチェック
    */
   checkKPIAlerts(monthlyKPIs, dailyKPIs) {
     const alerts = [];
-    const kpiSettings = this.config.getKPISettings();
 
-    // 利益率アラート
-    if (monthlyKPIs.profitMargin < kpiSettings.targetProfitMargin) {
+    // 利益目標未達アラート
+    if (monthlyKPIs.profitGoalAchievement < 80) {
       alerts.push({
-        type: 'LOW_PROFIT_MARGIN',
-        severity: 'WARNING',
-        message: `利益率が目標を下回っています: ${monthlyKPIs.profitMargin.toFixed(1)}% (目標: ${kpiSettings.targetProfitMargin}%)`,
-        value: monthlyKPIs.profitMargin,
-        target: kpiSettings.targetProfitMargin
+        type: 'profit_target',
+        severity: 'high',
+        message: `月間利益目標の達成率が${monthlyKPIs.profitGoalAchievement.toFixed(1)}%です`
       });
     }
 
-    // ROIアラート
-    if (monthlyKPIs.roi < kpiSettings.targetROI) {
+    // 在庫回転率アラート
+    if (monthlyKPIs.inventoryTurnover < 0.5) {
       alerts.push({
-        type: 'LOW_ROI',
-        severity: 'WARNING',
-        message: `ROIが目標を下回っています: ${monthlyKPIs.roi.toFixed(1)}% (目標: ${kpiSettings.targetROI}%)`,
-        value: monthlyKPIs.roi,
-        target: kpiSettings.targetROI
-      });
-    }
-
-    // 在庫過多アラート
-    if (monthlyKPIs.totalInventoryValue > kpiSettings.maxInventoryValue) {
-      alerts.push({
-        type: 'EXCESS_INVENTORY',
-        severity: 'WARNING',
-        message: `在庫金額が上限を超えています: ${NumberUtils.formatCurrency(monthlyKPIs.totalInventoryValue)}`,
-        value: monthlyKPIs.totalInventoryValue,
-        target: kpiSettings.maxInventoryValue
+        type: 'inventory_turnover',
+        severity: 'medium',
+        message: `在庫回転率が低下しています: ${monthlyKPIs.inventoryTurnover.toFixed(2)}`
       });
     }
 
     // 滞留在庫アラート
     if (monthlyKPIs.stagnantInventoryRate > 15) {
       alerts.push({
-        type: 'STAGNANT_INVENTORY',
-        severity: 'CRITICAL',
-        message: `滞留在庫率が高すぎます: ${monthlyKPIs.stagnantInventoryRate.toFixed(1)}%`,
-        value: monthlyKPIs.stagnantInventoryRate,
-        target: 10
-      });
-    }
-
-    // 目標未達アラート
-    if (monthlyKPIs.profitGoalAchievement < 80) {
-      alerts.push({
-        type: 'PROFIT_GOAL_BEHIND',
-        severity: 'HIGH',
-        message: `月利目標の進捗が遅れています: ${monthlyKPIs.profitGoalAchievement.toFixed(1)}%`,
-        value: monthlyKPIs.profitGoalAchievement,
-        target: 100
+        type: 'stagnant_inventory',
+        severity: 'medium',
+        message: `滞留在庫率が${monthlyKPIs.stagnantInventoryRate.toFixed(1)}%です`
       });
     }
 
     return alerts;
+  }
+
+  /**
+   * 滞留在庫計算
+   */
+  calculateStagnantInventory(inventoryData) {
+    const stagnantThreshold = 30; // 30日以上
+    const stagnantItems = inventoryData.filter(inv => inv.days_in_stock > stagnantThreshold);
+    
+    return {
+      count: stagnantItems.length,
+      rate: NumberUtils.percentage(stagnantItems.length, inventoryData.length)
+    };
+  }
+
+  /**
+   * 低在庫商品計算
+   */
+  calculateLowStockItems(inventoryData) {
+    return inventoryData.filter(inv => inv.current_stock < inv.reorder_point);
+  }
+
+  /**
+   * 平均在庫価値計算
+   */
+  calculateAverageInventoryValue(inventoryData) {
+    if (inventoryData.length === 0) return 0;
+    const totalValue = ArrayUtils.sum(inventoryData, inv => inv.inventory_value);
+    return totalValue / inventoryData.length;
+  }
+
+  /**
+   * 成長率計算
+   */
+  calculateGrowthRate(todaySales, weekSales) {
+    const todayRevenue = ArrayUtils.sum(todaySales, sale => sale.total_amount);
+    const weeklyAvg = ArrayUtils.average(weekSales, sale => sale.total_amount);
+    
+    if (weeklyAvg === 0) return 0;
+    return NumberUtils.percentage(todayRevenue - weeklyAvg, weeklyAvg);
+  }
+
+  /**
+   * 商品パフォーマンス計算
+   */
+  calculateProductPerformance(revenue, profit, quantity) {
+    if (revenue === 0) return 'poor';
+    
+    const profitMargin = NumberUtils.percentage(profit, revenue);
+    
+    if (profitMargin > 30 && quantity > 10) return 'excellent';
+    if (profitMargin > 20 && quantity > 5) return 'good';
+    if (profitMargin > 10) return 'average';
+    return 'poor';
   }
 }
 

@@ -50,6 +50,8 @@ class MakadoProcessor {
       // SKUマッピング更新
       this.updateSKUMapping(processedData);
       
+      console.log(`ファイル処理完了: ${fileName}, 処理件数: ${processedData.length}`);
+      
       return {
         success: true,
         fileName: fileName,
@@ -105,6 +107,8 @@ class MakadoProcessor {
         throw new Error('ファイルサイズが大きすぎます（10MB以下にしてください）');
       }
 
+      console.log(`ファイル読み込み開始: ${file.getName()}, サイズ: ${file.getSize()}bytes`);
+
       // Blobとして取得
       const blob = file.getBlob();
       
@@ -112,11 +116,16 @@ class MakadoProcessor {
       let content;
       try {
         content = blob.getDataAsString('Shift_JIS');
+        console.log('Shift-JISエンコーディングで読み込み成功');
       } catch (encodingError) {
         // フォールバック: UTF-8として読み込み
         console.warn('Shift-JIS読み込みに失敗、UTF-8で試行:', encodingError);
         content = blob.getDataAsString('UTF-8');
+        console.log('UTF-8エンコーディングで読み込み成功');
       }
+
+      // 最初の100文字を表示（デバッグ用）
+      console.log('読み込み内容サンプル:', content.substring(0, 100));
 
       return content;
 
@@ -136,6 +145,8 @@ class MakadoProcessor {
     try {
       const lines = content.split('\n').filter(line => line.trim());
       
+      console.log(`CSV解析開始: 全${lines.length}行`);
+      
       if (lines.length < 2) {
         throw new Error('CSVファイルにデータがありません');
       }
@@ -144,8 +155,12 @@ class MakadoProcessor {
       const headerLine = lines[0];
       const headers = CSVUtils.parseCSVLine(headerLine);
       
+      console.log('CSVヘッダー:', headers);
+      
       // カラムマッピング定義
       const columnMapping = this.getColumnMapping();
+      
+      console.log('カラムマッピング:', columnMapping);
       
       // データ行解析
       const records = [];
@@ -171,6 +186,8 @@ class MakadoProcessor {
         }
       }
 
+      console.log(`CSV解析完了: 成功${records.length}件、エラー${errors.length}件`);
+
       // エラーがある場合は警告
       if (errors.length > 0) {
         console.warn(`CSV解析で${errors.length}行のエラーがありました:`, errors.slice(0, 5));
@@ -194,7 +211,7 @@ class MakadoProcessor {
    */
   getColumnMapping() {
     return {
-      '日付': 'order_date',
+      '注文日': 'order_date',
       '商品名': 'product_name',
       'オーダーID': 'order_id',
       'ASIN': 'asin',
@@ -205,7 +222,7 @@ class MakadoProcessor {
       '送料': 'shipping_fee',
       'ポイント': 'points',
       '割引': 'discount',
-      '仕入価格': 'purchase_cost',
+      '仕入れ価格': 'purchase_cost',
       'その他経費': 'other_cost',
       'Amazon手数料': 'amazon_fee',
       '粗利': 'gross_profit',
@@ -221,20 +238,37 @@ class MakadoProcessor {
   mapCSVRecord(headers, values, columnMapping) {
     const record = {};
     
+    console.log(`レコードマッピング開始: ヘッダー数=${headers.length}, 値数=${values.length}`);
+    
     // ヘッダーとバリューの対応付け
     headers.forEach((header, index) => {
       const mappedKey = columnMapping[header];
       if (mappedKey && values[index] !== undefined) {
-        record[mappedKey] = this.convertValue(values[index], mappedKey);
+        const value = this.convertValue(values[index], mappedKey);
+        record[mappedKey] = value;
+        
+        if (index < 5) { // 最初の5列のみログ出力
+          console.log(`マッピング: ${header} (${index}) -> ${mappedKey} = ${value}`);
+        }
+      } else if (index < 5) {
+        console.log(`マッピング対象外: ${header} (${index}) = ${values[index]}`);
       }
     });
 
+    console.log('マッピング後のレコード構造:', Object.keys(record));
+
     // 必須フィールドチェック
     const requiredFields = ['order_date', 'order_id', 'asin', 'makado_sku'];
+    const missingFields = [];
+    
     for (const field of requiredFields) {
       if (!record[field]) {
-        throw new Error(`必須フィールドが不足しています: ${field}`);
+        missingFields.push(field);
       }
+    }
+    
+    if (missingFields.length > 0) {
+      throw new Error(`必須フィールドが不足しています: ${missingFields.join(', ')}`);
     }
 
     // 統一SKU生成
@@ -366,9 +400,11 @@ class MakadoProcessor {
       errors.push('仕入価格が負の値です');
     }
 
-    // 数量検証
-    if (record.quantity <= 0) {
-      errors.push('販売数量が0以下です');
+    // 数量検証（返品・キャンセルの場合は0を許可）
+    if (record.quantity < 0) {
+      errors.push('販売数量が負の値です');
+    } else if (record.quantity === 0 && record.status !== 'RETURN' && record.status !== 'CANCELLED') {
+      errors.push('販売数量が0です（返品・キャンセル以外）');
     }
 
     // ASIN検証
@@ -546,13 +582,16 @@ class MakadoProcessor {
   normalizeStatus(status) {
     if (!status) return 'UNKNOWN';
     
-    const normalized = status.toString().trim();
+    const normalized = status.toString().trim().toUpperCase();
     
     const statusMap = {
-      'Shipped': 'SHIPPED',
-      'Pending': 'PENDING',
-      'Cancelled': 'CANCELLED',
-      'Refunded': 'REFUNDED'
+      'SHIPPED': 'SHIPPED',
+      'PENDING': 'PENDING',
+      'CANCELLED': 'CANCELLED',
+      'CANCELED': 'CANCELLED',
+      'REFUNDED': 'REFUNDED',
+      'RETURN': 'RETURN',
+      'RETURNED': 'RETURN'
     };
     
     return statusMap[normalized] || normalized;
