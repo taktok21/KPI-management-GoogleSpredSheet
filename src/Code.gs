@@ -170,12 +170,13 @@ function importMakadoCSV() {
     const fileName = response.getResponseText();
     
     try {
-      const processor = new MakadoProcessor();
-      const result = processor.importCSV(fileName);
+      // 最適化版を使用
+      const processor = new MakadoProcessorOptimized();
+      const result = processor.processCSVFile(fileName);
       
       ui.alert(
         '完了',
-        `マカドCSVの取り込みが完了しました。\n取り込み件数: ${result.recordCount}件`,
+        `マカドCSVの取り込みが完了しました。\n取り込み件数: ${result.recordCount}件\n処理時間: ${result.duration}秒`,
         ui.ButtonSet.OK
       );
       

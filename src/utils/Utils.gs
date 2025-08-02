@@ -86,6 +86,43 @@ class DateUtils {
   }
 
   /**
+   * 今日の日付を取得（時刻を00:00:00にリセット）
+   */
+  static getToday() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today;
+  }
+
+  /**
+   * 過去7日間の範囲を取得
+   */
+  static getLast7Days() {
+    const end = this.getToday();
+    const start = new Date(end);
+    start.setDate(start.getDate() - 7);
+    
+    return {
+      start: start,
+      end: end
+    };
+  }
+
+  /**
+   * 同じ日付かどうかを判定（時刻は無視）
+   */
+  static isSameDay(date1, date2) {
+    if (!date1 || !date2) return false;
+    
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+  }
+
+  /**
    * ISO週番号を取得
    */
   static getWeekNumber(date) {
