@@ -219,6 +219,25 @@ class KPICalculator {
    * 販売レコードをマッピング
    */
   mapSalesRecord(row) {
+    const unit_price = NumberUtils.safeNumber(row[6]);
+    const quantity = NumberUtils.safeInteger(row[7]);
+    let total_amount = NumberUtils.safeNumber(row[8]);
+    let gross_profit = NumberUtils.safeNumber(row[12]);
+    
+    // total_amountが0または空の場合は unit_price × quantity で計算
+    if (total_amount === 0 && unit_price > 0 && quantity > 0) {
+      total_amount = unit_price * quantity;
+      
+      // 粗利益も再計算（total_amount - purchase_cost - amazon_fee - other_cost）
+      const purchase_cost = NumberUtils.safeNumber(row[9]);
+      const amazon_fee = NumberUtils.safeNumber(row[10]);
+      const other_cost = NumberUtils.safeNumber(row[11]);
+      
+      if (gross_profit === 0) {
+        gross_profit = total_amount - purchase_cost - amazon_fee - other_cost;
+      }
+    }
+    
     return {
       order_id: row[0],
       asin: row[1],
@@ -226,13 +245,13 @@ class KPICalculator {
       unified_sku: row[3],
       makado_sku: row[4],
       product_name: row[5],
-      unit_price: NumberUtils.safeNumber(row[6]),
-      quantity: NumberUtils.safeInteger(row[7]),
-      total_amount: NumberUtils.safeNumber(row[8]),
+      unit_price: unit_price,
+      quantity: quantity,
+      total_amount: total_amount,
       purchase_cost: NumberUtils.safeNumber(row[9]),
       amazon_fee: NumberUtils.safeNumber(row[10]),
       other_cost: NumberUtils.safeNumber(row[11]),
-      gross_profit: NumberUtils.safeNumber(row[12]),
+      gross_profit: gross_profit,
       profit_margin: NumberUtils.safeNumber(row[13]),
       status: row[14],
       fulfillment: row[15],
