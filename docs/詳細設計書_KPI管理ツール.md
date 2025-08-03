@@ -74,7 +74,21 @@ const SHEET_CONFIG = {
 | import_timestamp | DATETIME | インポート日時 | NOT NULL |
 | marketplace | STRING | マーケットプレイス | DEFAULT 'JP' |
 
-### 2.2 在庫一覧テーブル
+### 2.2 仕入履歴テーブル
+| カラム名 | 型 | 説明 | 制約 |
+|----------|-----|------|------|
+| unified_sku | STRING | 統一SKU（UNI-{ASIN}-{Date}） | PRIMARY KEY |
+| asin | STRING | Amazon商品ID | NOT NULL |
+| purchase_date | DATE | 仕入日 | NOT NULL |
+| supplier | STRING | 仕入先名 | NOT NULL |
+| quantity | INTEGER | 仕入数量 | NOT NULL, > 0 |
+| unit_cost | DECIMAL | 仕入単価 | NOT NULL, >= 0 |
+| total_cost | DECIMAL | 仕入合計金額 | NOT NULL, >= 0 |
+| shipping_cost | DECIMAL | 送料 | >= 0 |
+| notes | STRING | 備考 | |
+| created_at | DATETIME | 登録日時 | DEFAULT NOW |
+
+### 2.3 在庫一覧テーブル
 | カラム名 | 型 | 説明 | 制約 |
 |----------|-----|------|------|
 | sku | STRING | 統一SKU | PRIMARY KEY |
@@ -92,7 +106,7 @@ const SHEET_CONFIG = {
 | monthly_sales | INTEGER | 月間販売数 | CALCULATED |
 | alert_flag | STRING | アラート | IN ('滞留', '在庫切れ間近', NULL) |
 
-### 2.3 SKUマッピングテーブル
+### 2.4 SKUマッピングテーブル
 | カラム名 | 型 | 説明 | 制約 |
 |----------|-----|------|------|
 | unified_sku | STRING | 統一SKU | PRIMARY KEY |
@@ -607,6 +621,8 @@ const roiAchievement = NumberUtils.percentage(kpis.roi, kpiSettings.targetROI);
 - データマッピング処理の堅牢性向上
 - 目標値設定の柔軟性向上
 - エラー時の自動復旧機能強化
+- 仕入履歴テーブル構造の整合性修正
+- KPICalculator.mapPurchaseRecordとSetupManagerの統一
 
 #### 技術的詳細
 - 実装ファイル数：9ファイル

@@ -281,20 +281,21 @@ class KPICalculator {
 
   /**
    * 仕入レコードをマッピング
+   * SetupManagerのヘッダー順序と整合：
+   * '統一SKU', 'ASIN', '仕入日', '仕入先', '数量', '単価', '合計金額', '送料', '備考', '登録日時'
    */
   mapPurchaseRecord(row) {
     return {
-      purchase_date: new Date(row[0]),
+      unified_sku: row[0],
       asin: row[1],
-      unified_sku: row[2],
-      product_name: row[3],
+      purchase_date: new Date(row[2]),
+      supplier: row[3],
       quantity: NumberUtils.safeInteger(row[4]),
       unit_cost: NumberUtils.safeNumber(row[5]),
       total_cost: NumberUtils.safeNumber(row[6]),
-      supplier: row[7],
-      purchase_order: row[8],
-      status: row[9],
-      notes: row[10]
+      shipping_cost: NumberUtils.safeNumber(row[7]),
+      notes: row[8],
+      created_at: new Date(row[9])
     };
   }
 
