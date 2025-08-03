@@ -322,6 +322,9 @@ class KPICalculator {
     const totalGrossProfit = ArrayUtils.sum(monthlySales, sale => sale.gross_profit);
     const totalQuantity = ArrayUtils.sum(monthlySales, sale => sale.quantity);
     const totalPurchaseAmount = ArrayUtils.sum(monthlyPurchases, purchase => purchase.total_cost);
+    
+    // 仕入原価の合計（販売データから取得）
+    const totalPurchaseCost = ArrayUtils.sum(monthlySales, sale => sale.purchase_cost);
 
     // 在庫KPI
     const totalInventoryValue = ArrayUtils.sum(inventoryData, inv => inv.inventory_value);
@@ -329,7 +332,11 @@ class KPICalculator {
 
     // 計算KPI
     const profitMargin = NumberUtils.percentage(totalGrossProfit, totalRevenue);
-    const roi = NumberUtils.percentage(totalGrossProfit, totalPurchaseAmount);
+    
+    // ROI計算：仕入履歴データがない場合は販売データの仕入原価を使用
+    const roiBase = totalPurchaseAmount > 0 ? totalPurchaseAmount : totalPurchaseCost;
+    const roi = NumberUtils.percentage(totalGrossProfit, roiBase);
+    
     const inventoryTurnover = NumberUtils.calculateTurnoverRate(totalRevenue, averageInventoryValue);
 
     // 商品分析
@@ -466,9 +473,15 @@ class KPICalculator {
     
     // 利益率
     sheet.getRange('B7').setValue(kpis.profitMargin / 100);
+    // 利益率の達成率
+    const profitMarginAchievement = NumberUtils.percentage(kpis.profitMargin, kpiSettings.targetProfitMargin);
+    sheet.getRange('D7').setValue(profitMarginAchievement / 100);
     
     // ROI
     sheet.getRange('B8').setValue(kpis.roi / 100);
+    // ROIの達成率
+    const roiAchievement = NumberUtils.percentage(kpis.roi, kpiSettings.targetROI);
+    sheet.getRange('D8').setValue(roiAchievement / 100);
     
     // 販売数
     sheet.getRange('B9').setValue(kpis.salesQuantity);
