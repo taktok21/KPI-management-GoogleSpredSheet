@@ -102,16 +102,30 @@ function manualDataSync() {
   
   if (response === ui.Button.YES) {
     try {
-      // プログレス表示
-      showProgressDialog('データ更新中...', '処理が完了するまでお待ちください。');
+      // プログレス表示（簡易版）
+      ui.alert('処理中', 'データ更新中です。しばらくお待ちください...', ui.ButtonSet.OK);
       
       // メインバッチ処理実行
-      const result = runDailyBatch();
+      const processor = new BatchProcessor();
+      const result = processor.runDailyBatch();
+      
+      // resultが正しく返されているか確認
+      if (!result || typeof result !== 'object') {
+        throw new Error('バッチ処理の結果が正しく返されませんでした');
+      }
+      
+      // 更新件数を集計
+      const totalRecords = (result.updateResults?.amazon?.recordCount || 0) + 
+                         (result.updateResults?.makado?.recordCount || 0) + 
+                         (result.updateResults?.inventory?.recordCount || 0);
+      
+      // 処理時間を安全に取得
+      const duration = result.duration ? result.duration.toFixed(1) : '不明';
       
       // 結果表示
       ui.alert(
         '完了',
-        `データ更新が完了しました。\n処理時間: ${result.duration}秒\n更新件数: ${result.recordCount}件`,
+        `データ更新が完了しました。\n処理時間: ${duration}秒\n更新件数: ${totalRecords}件`,
         ui.ButtonSet.OK
       );
       
@@ -133,7 +147,7 @@ function recalculateKPIs() {
   const ui = SpreadsheetApp.getUi();
   
   try {
-    showProgressDialog('KPI計算中...', 'KPIを再計算しています。');
+    ui.alert('処理中', 'KPIを再計算しています。しばらくお待ちください...', ui.ButtonSet.OK);
     
     const calculator = new KPICalculator();
     calculator.recalculateAll();
