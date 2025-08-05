@@ -24,6 +24,7 @@ const APP_CONFIG = {
  */
 const SHEET_CONFIG = {
   KPI_MONTHLY: 'KPI月次管理',
+  KPI_HISTORY: 'KPI履歴',
   SALES_HISTORY: '販売履歴',
   PURCHASE_HISTORY: '仕入履歴',
   INVENTORY: '在庫一覧',
@@ -57,7 +58,8 @@ function onOpen() {
       .addSubMenu(ui.createMenu('📈 レポート')
         .addItem('日次レポート生成', 'generateDailyReport')
         .addItem('週次レポート生成', 'generateWeeklyReport')
-        .addItem('月次レポート生成', 'generateMonthlyReport'))
+        .addItem('月次レポート生成', 'generateMonthlyReport')
+        .addItem('過去実績表示', 'showHistoricalKPIs'))
       .addSeparator()
       .addSubMenu(ui.createMenu('🔧 管理')
         .addItem('初期セットアップ', 'initialSetup')
@@ -378,6 +380,44 @@ function createMissingSheets(missingSheets) {
     console.error('シート作成エラー:', error);
     const ui = SpreadsheetApp.getUi();
     ui.alert('エラー', `シート作成中にエラーが発生しました：\n${error.message}`, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * 過去実績表示
+ */
+function showHistoricalKPIs() {
+  const ui = SpreadsheetApp.getUi();
+  
+  try {
+    const historyManager = new KPIHistoryManager();
+    const historicalKPIs = historyManager.getHistoricalKPIs(12);
+    
+    if (historicalKPIs.length === 0) {
+      ui.alert('データなし', '過去のKPIデータがありません。', ui.ButtonSet.OK);
+      return;
+    }
+    
+    // 過去実績レポートを生成
+    let report = '📊 過去12ヶ月のKPI実績\n\n';
+    
+    historicalKPIs.forEach((kpi, index) => {
+      if (kpi.hasData) {
+        report += `【${kpi.yearMonth}】\n`;
+        report += `売上高: ¥${NumberUtils.formatNumber(kpi.revenue)}\n`;
+        report += `粗利益: ¥${NumberUtils.formatNumber(kpi.grossProfit)} (${kpi.profitMargin.toFixed(1)}%)\n`;
+        report += `ROI: ${kpi.roi.toFixed(1)}%\n`;
+        report += `達成率: ${kpi.profitGoalAchievement.toFixed(1)}%\n`;
+        report += '\n';
+      }
+    });
+    
+    // 簡易レポート表示（将来的にはグラフ表示も検討）
+    ui.alert('過去実績', report, ui.ButtonSet.OK);
+    
+  } catch (error) {
+    ErrorHandler.handleError(error, 'showHistoricalKPIs');
+    ui.alert('エラー', '過去実績の表示中にエラーが発生しました。', ui.ButtonSet.OK);
   }
 }
 

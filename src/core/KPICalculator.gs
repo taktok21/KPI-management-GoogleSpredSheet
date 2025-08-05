@@ -451,6 +451,26 @@ class KPICalculator {
       // 日次KPI更新
       this.updateDailyKPIValues(kpiSheet, dailyKPIs);
 
+      // 履歴管理と前月比更新
+      try {
+        const historyManager = new KPIHistoryManager();
+        
+        // 現在の月のKPIを履歴に保存
+        const currentMonth = DateUtils.getCurrentMonth();
+        historyManager.saveMonthlyKPI(currentMonth, monthlyKPIs);
+        
+        // 前月のKPIを取得して前月比を計算
+        const historicalKPIs = historyManager.getHistoricalKPIs(2);
+        if (historicalKPIs.length >= 2) {
+          const previousMonth = historicalKPIs[0];
+          if (previousMonth && previousMonth.hasData) {
+            this.updateMonthOverMonth(kpiSheet, monthlyKPIs, previousMonth);
+          }
+        }
+      } catch (error) {
+        console.error('履歴管理エラー:', error);
+      }
+
       console.log('KPIダッシュボード更新完了');
 
     } catch (error) {
@@ -515,6 +535,56 @@ class KPICalculator {
     
     // 本日注文数
     sheet.getRange('B19').setValue(kpis.todayOrders);
+  }
+
+  /**
+   * 前月比を更新
+   */
+  updateMonthOverMonth(sheet, currentKPIs, previousKPIs) {
+    const historyManager = new KPIHistoryManager();
+    const monthOverMonth = historyManager.calculateMonthOverMonth(currentKPIs, previousKPIs);
+    
+    if (!monthOverMonth) {
+      return;
+    }
+    
+    // 前月比を表示（E列）
+    // 売上高
+    if (monthOverMonth.revenue !== null) {
+      sheet.getRange('E5').setValue(monthOverMonth.revenue / 100);
+    }
+    
+    // 粗利益
+    if (monthOverMonth.grossProfit !== null) {
+      sheet.getRange('E6').setValue(monthOverMonth.grossProfit / 100);
+    }
+    
+    // 利益率（ポイント差）
+    if (monthOverMonth.profitMargin !== null) {
+      sheet.getRange('E7').setValue(monthOverMonth.profitMargin / 100);
+    }
+    
+    // ROI（ポイント差）
+    if (monthOverMonth.roi !== null) {
+      sheet.getRange('E8').setValue(monthOverMonth.roi / 100);
+    }
+    
+    // 販売数
+    if (monthOverMonth.salesQuantity !== null) {
+      sheet.getRange('E9').setValue(monthOverMonth.salesQuantity / 100);
+    }
+    
+    // 前月比のフォーマット設定（正の値は緑、負の値は赤）
+    const ranges = ['E5', 'E6', 'E7', 'E8', 'E9'];
+    ranges.forEach(range => {
+      const cell = sheet.getRange(range);
+      const value = cell.getValue();
+      if (value > 0) {
+        cell.setFontColor('green');
+      } else if (value < 0) {
+        cell.setFontColor('red');
+      }
+    });
   }
 
   /**

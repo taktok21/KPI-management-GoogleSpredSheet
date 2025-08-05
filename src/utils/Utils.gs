@@ -132,6 +132,14 @@ class DateUtils {
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
+
+  /**
+   * 現在の年月を取得（YYYY-MM形式）
+   */
+  static getCurrentMonth() {
+    const now = new Date();
+    return this.formatDate(now, 'yyyy-MM');
+  }
 }
 
 // =============================================================================
@@ -264,6 +272,14 @@ class NumberUtils {
     
     const percent = (part / whole) * 100;
     return Math.round(percent * Math.pow(10, decimalPlaces)) / Math.pow(10, decimalPlaces);
+  }
+
+  /**
+   * 数値をカンマ区切りでフォーマット
+   */
+  static formatNumber(num) {
+    const safeNum = this.safeNumber(num);
+    return safeNum.toLocaleString('ja-JP');
   }
 
   /**
