@@ -59,7 +59,8 @@ function onOpen() {
         .addItem('日次レポート生成', 'generateDailyReport')
         .addItem('週次レポート生成', 'generateWeeklyReport')
         .addItem('月次レポート生成', 'generateMonthlyReport')
-        .addItem('過去実績表示', 'showHistoricalKPIs'))
+        .addItem('過去実績表示', 'showHistoricalKPIs')
+        .addItem('全グラフ更新', 'updateAllCharts'))
       .addSeparator()
       .addSubMenu(ui.createMenu('🔧 管理')
         .addItem('初期セットアップ', 'initialSetup')
@@ -67,6 +68,11 @@ function onOpen() {
         .addItem('データクリーンアップ', 'cleanupData')
         .addItem('エラーログ確認', 'showErrorLog'))
       .addSeparator()
+      .addSeparator()
+      .addSubMenu(ui.createMenu('🧪 テスト')
+        .addItem('テストチャート作成', 'createTestChart')
+        .addItem('KPIチャート作成', 'createKPIChart')
+        .addItem('全テストチャート作成', 'createAllTestCharts'))
       .addItem('❓ ヘルプ', 'showHelp')
       .addToUi();
       
@@ -418,6 +424,268 @@ function showHistoricalKPIs() {
   } catch (error) {
     ErrorHandler.handleError(error, 'showHistoricalKPIs');
     ui.alert('エラー', '過去実績の表示中にエラーが発生しました。', ui.ButtonSet.OK);
+  }
+}
+
+// =============================================================================
+// トリガー処理
+// =============================================================================
+
+/**
+ * セル編集時のイベントハンドラー
+ * G2セル（期間選択）の変更を監視し、KPIデータとグラフを更新します
+ */
+function onEdit(e) {
+  try {
+    const range = e.range;
+    const sheet = range.getSheet();
+    const sheetName = sheet.getName();
+    
+    // KPI月次管理シートのG2セル（期間選択）監視
+    if (sheetName === SHEET_CONFIG.KPI_MONTHLY && 
+        range.getA1Notation() === 'G2') {
+      handlePeriodSelectionChange(e);
+    }
+    
+    // データシート更新時のKPI再計算（遅延実行）
+    if ([SHEET_CONFIG.SALES_HISTORY, SHEET_CONFIG.PURCHASE_HISTORY, SHEET_CONFIG.INVENTORY].includes(sheetName)) {
+      scheduleKPIRecalculation();
+    }
+    
+  } catch (error) {
+    console.error('onEdit処理エラー:', error);
+    ErrorHandler.handleError(error, 'onEdit', { 
+      range: e.range?.getA1Notation(),
+      sheet: e.range?.getSheet()?.getName()
+    });
+  }
+}
+
+/**
+ * 期間選択変更処理
+ * G2セルの値が変更された時に実行されます
+ */
+function handlePeriodSelectionChange(e) {
+  try {
+    const selectedPeriod = e.value;
+    if (!selectedPeriod) {
+      console.log('期間が選択されていません');
+      return;
+    }
+
+    console.log(`期間選択が変更されました: ${selectedPeriod}`);
+
+    // 選択期間をパース（例：「2024年08月」→「2024-08」）
+    const targetMonth = parsePeriodString(selectedPeriod);
+    if (!targetMonth) {
+      console.error('無効な期間形式です:', selectedPeriod);
+      return;
+    }
+
+    // KPI履歴管理とシート管理のインスタンス作成
+    const historyManager = new KPIHistoryManager();
+    const sheetManager = new SheetManager();
+
+    // 現在のKPIを取得
+    const calculator = new KPICalculator();
+    const currentResult = calculator.recalculateAll();
+    const currentKPI = currentResult.monthlyKPIs;
+
+    // 前年同月のKPIを取得
+    const previousYearKPI = historyManager.getPreviousYearKPI(DateUtils.getCurrentMonth());
+
+    // 前年同月比を計算
+    const yoyComparison = historyManager.calculateYearOverYear(currentKPI, targetMonth);
+
+    // F列の前年同月比を更新
+    updateYearOverYearDisplay(yoyComparison);
+
+    // グラフも更新
+    const historicalKPIs = historyManager.getHistoricalKPIs(12);
+    const kpiData = {
+      current: currentKPI,
+      historical: historicalKPIs,
+      previousYear: previousYearKPI
+    };
+
+    // グラフを非同期で更新（UI応答性を保つため）
+    Utilities.sleep(100); // 短い遅延
+    sheetManager.updateChartsResponsively(kpiData);
+
+    console.log('期間選択変更処理が完了しました');
+
+  } catch (error) {
+    console.error('期間選択変更処理エラー:', error);
+    ErrorHandler.handleError(error, 'handlePeriodSelectionChange');
+  }
+}
+
+/**
+ * KPI再計算をスケジュール（遅延実行）
+ * データシート変更時に重複実行を防ぐため遅延させます
+ */
+function scheduleKPIRecalculation() {
+  try {
+    // 既存の遅延トリガーを削除
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'executeScheduledKPIRecalculation') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+
+    // 5秒後に実行するトリガーを作成
+    ScriptApp.newTrigger('executeScheduledKPIRecalculation')
+      .timeBased()
+      .after(5000)
+      .create();
+
+    console.log('KPI再計算がスケジュールされました（5秒後実行）');
+
+  } catch (error) {
+    console.error('KPI再計算スケジュールエラー:', error);
+    ErrorHandler.handleError(error, 'scheduleKPIRecalculation');
+  }
+}
+
+/**
+ * スケジュールされたKPI再計算を実行
+ * 遅延トリガーから呼び出されます
+ */
+function executeScheduledKPIRecalculation() {
+  try {
+    console.log('スケジュールされたKPI再計算を開始します...');
+
+    // KPI再計算実行
+    const calculator = new KPICalculator();
+    calculator.recalculateAll();
+
+    // グラフも更新
+    updateAllCharts();
+
+    // 実行後にトリガーを削除
+    const triggers = ScriptApp.getProjectTriggers();
+    triggers.forEach(trigger => {
+      if (trigger.getHandlerFunction() === 'executeScheduledKPIRecalculation') {
+        ScriptApp.deleteTrigger(trigger);
+      }
+    });
+
+    console.log('スケジュールされたKPI再計算が完了しました');
+
+  } catch (error) {
+    console.error('スケジュールされたKPI再計算エラー:', error);
+    ErrorHandler.handleError(error, 'executeScheduledKPIRecalculation');
+  }
+}
+
+/**
+ * 期間文字列をパース
+ * @param {string} periodString - 期間文字列（例：「2024年08月」）
+ * @returns {string|null} パースされた期間（例：「2024-08」）
+ */
+function parsePeriodString(periodString) {
+  try {
+    if (!periodString) return null;
+
+    // 「2024年08月」形式のパース
+    const match = periodString.match(/(\d{4})年(\d{1,2})月/);
+    if (match) {
+      const year = match[1];
+      const month = match[2].padStart(2, '0');
+      return `${year}-${month}`;
+    }
+
+    // 「2024-08」形式の場合はそのまま返す
+    if (/^\d{4}-\d{2}$/.test(periodString)) {
+      return periodString;
+    }
+
+    console.warn('期間文字列の形式が不正です:', periodString);
+    return null;
+
+  } catch (error) {
+    console.error('期間文字列パースエラー:', error);
+    return null;
+  }
+}
+
+/**
+ * 前年同月比表示を更新
+ * @param {Object} yoyComparison - 前年同月比データ
+ */
+function updateYearOverYearDisplay(yoyComparison) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_CONFIG.KPI_MONTHLY);
+    if (!sheet) {
+      console.error('KPI月次管理シートが見つかりません');
+      return;
+    }
+
+    if (!yoyComparison) {
+      // データがない場合は「-」を表示
+      const yoyRange = sheet.getRange('F5:F12');
+      yoyRange.setValue('-');
+      console.log('前年同月比データがないため「-」を表示しました');
+      return;
+    }
+
+    // 前年同月比を表示（F列）
+    if (yoyComparison.revenue !== null && yoyComparison.revenue !== undefined) {
+      sheet.getRange('F5').setValue(yoyComparison.revenue / 100);
+    }
+
+    if (yoyComparison.grossProfit !== null && yoyComparison.grossProfit !== undefined) {
+      sheet.getRange('F6').setValue(yoyComparison.grossProfit / 100);
+    }
+
+    if (yoyComparison.profitMargin !== null && yoyComparison.profitMargin !== undefined) {
+      sheet.getRange('F7').setValue(yoyComparison.profitMargin / 100);
+    }
+
+    if (yoyComparison.roi !== null && yoyComparison.roi !== undefined) {
+      sheet.getRange('F8').setValue(yoyComparison.roi / 100);
+    }
+
+    if (yoyComparison.salesQuantity !== null && yoyComparison.salesQuantity !== undefined) {
+      sheet.getRange('F9').setValue(yoyComparison.salesQuantity / 100);
+    }
+
+    // 条件付き書式の適用（正の値は緑、負の値は赤）
+    const yoyRange = sheet.getRange('F5:F12');
+    
+    // 既存の条件付き書式をクリア
+    yoyRange.clearFormat();
+    
+    // パーセント表示
+    yoyRange.setNumberFormat('0.0%');
+    
+    // 条件付き書式を設定
+    const rules = sheet.getConditionalFormatRules();
+    
+    const positiveRule = SpreadsheetApp.newConditionalFormatRule()
+      .setRanges([yoyRange])
+      .whenNumberGreaterThan(0)
+      .setBackground('#d9ead3')
+      .setFontColor('#137333')
+      .build();
+      
+    const negativeRule = SpreadsheetApp.newConditionalFormatRule()
+      .setRanges([yoyRange])
+      .whenNumberLessThan(0)
+      .setBackground('#fce5cd')
+      .setFontColor('#cc0000')
+      .build();
+    
+    rules.push(positiveRule);
+    rules.push(negativeRule);
+    sheet.setConditionalFormatRules(rules);
+
+    console.log('前年同月比の表示を更新しました');
+
+  } catch (error) {
+    console.error('前年同月比表示更新エラー:', error);
+    ErrorHandler.handleError(error, 'updateYearOverYearDisplay');
   }
 }
 

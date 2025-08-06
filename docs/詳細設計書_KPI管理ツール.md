@@ -1,8 +1,8 @@
 # 詳細設計書：Amazon販売KPI管理ツール
 
-**バージョン**: 1.4  
-**更新日**: 2025年8月5日  
-**更新内容**: KPI月次管理シート詳細構成・前年同月比計算・グラフ機能の追加
+**バージョン**: 1.5  
+**更新日**: 2025年8月6日  
+**更新内容**: 新ダッシュボード（MVP版）実装詳細・8KPI体制・段階的更新システム
 
 ## 1. システム構成詳細
 
@@ -47,7 +47,14 @@ const SHEET_CONFIG = {
   PRODUCT_MASTER: 'ASIN/SKUマスタ',
   SYNC_LOG: 'データ連携ログ',
   CONFIG: '設定',
-  TEMP_DATA: '_一時データ'
+  TEMP_DATA: '_一時データ',
+  // 新規追加（MVP版）
+  DASHBOARD: 'ダッシュボード',
+  PLAN_INPUT: 'plan_monthly_input',
+  VIEW_CATEGORY: 'ビュー_カテゴリ',
+  VIEW_SUPPLIER: 'ビュー_仕入先',
+  VIEW_SKU: 'ビュー_SKU',
+  SETTINGS: '設定'
 };
 ```
 
@@ -240,10 +247,31 @@ const CHART_CONFIG = {
 | inventory_turnover | DECIMAL | 在庫回転率 | >= 0 |
 | stagnant_inventory_rate | DECIMAL | 滞留在庫率（%） | >= 0 |
 | unique_products | INTEGER | 取扱商品数 | >= 0 |
+| dio | INTEGER | 在庫日数 | >= 0 |
+| return_rate | DECIMAL | 返品率（%） | >= 0 |
+| ccc | INTEGER | キャッシュサイクル（日） | |
+| new_product_rate | DECIMAL | 新商品投入率（%） | >= 0 |
 | average_order_value | DECIMAL | 平均注文額 | >= 0 |
 | profit_goal_achievement | DECIMAL | 利益目標達成率（%） | >= 0 |
 | calculated_at | DATETIME | 計算日時 | NOT NULL |
 | created_at | DATETIME | 作成日時 | DEFAULT NOW |
+
+### 2.6 plan_monthly_input（目標入力）テーブル
+| カラム名 | 型 | 説明 | 制約 |
+|----------|-----|------|------|
+| year_month | STRING | 年月（YYYY-MM） | COMPOSITE KEY |
+| granularity | STRING | 粒度 | IN ('business', 'category') |
+| category_code | STRING | カテゴリコード | NULLABLE |
+| revenue_target | DECIMAL | 売上目標 | >= 0 |
+| profit_target | DECIMAL | 粗利目標 | >= 0 |
+| profit_margin_target | DECIMAL | 粗利率目標（%） | 0-100 |
+| turnover_target | DECIMAL | 回転率目標 | >= 0 |
+| dio_target | INTEGER | DIO目標 | >= 0 |
+| ccc_target | INTEGER | CCC目標 | |
+| new_product_target | INTEGER | 新商品投入目標 | >= 0 |
+| remarks | STRING | 備考 | |
+| created_at | DATETIME | 作成日時 | DEFAULT NOW |
+| updated_at | DATETIME | 更新日時 | ON UPDATE NOW |
 
 ## 3. データ処理詳細
 
@@ -427,7 +455,7 @@ function parseMakadoCSV(csvContent) {
 
 ## 4. KPI計算機能詳細（強化版実装完了）
 
-### 4.1 月次KPI計算
+### 4.1 月次KPI計算（8指標対応）
 ```javascript
 calculateMonthlyKPIs(salesData, inventoryData, purchaseData) {
   const currentMonth = DateUtils.getCurrentMonthRange();
@@ -441,17 +469,40 @@ calculateMonthlyKPIs(salesData, inventoryData, purchaseData) {
   const totalRevenue = ArrayUtils.sum(monthlySales, sale => sale.total_amount);
   const totalGrossProfit = ArrayUtils.sum(monthlySales, sale => sale.gross_profit);
   const totalQuantity = ArrayUtils.sum(monthlySales, sale => sale.quantity);
+  const totalPurchaseAmount = ArrayUtils.sum(purchaseData, p => p.total_cost);
   
-  // 計算KPI
-  const profitMargin = NumberUtils.percentage(totalGrossProfit, totalRevenue);
-  const roi = NumberUtils.percentage(totalGrossProfit, totalPurchaseAmount);
+  // 返品率計算
+  const returnCount = monthlySales.filter(s => s.status === 'RETURN').length;
+  const returnRate = NumberUtils.percentage(returnCount, monthlySales.length);
+  
+  // 在庫関連KPI
+  const avgInventoryValue = NumberUtils.average(inventoryData, inv => inv.total_cost);
+  const inventoryTurnover = totalRevenue / avgInventoryValue;
+  const dio = 365 / inventoryTurnover;
+  
+  // CCC計算（物販では売掛金0日、買掛金30日想定）
+  const ccc = dio + 0 - 30;
+  
+  // 新商品投入率
+  const newProducts = inventoryData.filter(inv => 
+    DateUtils.daysBetween(inv.first_inbound_date, new Date()) <= 30
+  ).length;
+  const newProductRate = NumberUtils.percentage(newProducts, inventoryData.length);
   
   return {
+    // 基本8指標
     revenue: totalRevenue,
     grossProfit: totalGrossProfit,
-    profitMargin: profitMargin,
-    roi: roi,
-    profitGoalAchievement: NumberUtils.percentage(totalGrossProfit, 800000)
+    profitMargin: NumberUtils.percentage(totalGrossProfit, totalRevenue),
+    roi: NumberUtils.percentage(totalGrossProfit, totalPurchaseAmount),
+    inventoryTurnover: inventoryTurnover,
+    dio: Math.round(dio),
+    returnRate: returnRate,
+    ccc: Math.round(ccc),
+    newProductRate: newProductRate,
+    // 追加情報
+    profitGoalAchievement: NumberUtils.percentage(totalGrossProfit, 800000),
+    salesQuantity: totalQuantity
   };
 }
 ```
@@ -781,6 +832,162 @@ class KPIHistoryManager {
 ```
 
 ### 7.2 SheetManagerクラスの拡張（グラフ作成・更新）
+
+### 7.3 新ダッシュボード実装詳細
+
+#### ダッシュボードクラス設計
+```javascript
+class DashboardManager {
+  constructor() {
+    this.ss = SpreadsheetApp.getActiveSpreadsheet();
+    this.cache = new CacheUtils();
+  }
+
+  // KPIカード更新（8枚）
+  updateKPICards() {
+    const sheet = this.ss.getSheetByName(SHEET_CONFIG.DASHBOARD);
+    const kpis = this.calculateAllKPIs();
+    const targets = this.getMonthlyTargets();
+    
+    // KPIカード配置（2行4列）
+    const cardLayout = [
+      {name: '売上高', row: 2, col: 2, kpi: 'revenue'},
+      {name: '粗利益', row: 2, col: 4, kpi: 'grossProfit'},
+      {name: '粗利率', row: 2, col: 6, kpi: 'profitMargin'},
+      {name: '在庫回転', row: 2, col: 8, kpi: 'inventoryTurnover'},
+      {name: 'DIO', row: 5, col: 2, kpi: 'dio'},
+      {name: '返品率', row: 5, col: 4, kpi: 'returnRate'},
+      {name: 'CCC', row: 5, col: 6, kpi: 'ccc'},
+      {name: '新商品率', row: 5, col: 8, kpi: 'newProductRate'}
+    ];
+    
+    cardLayout.forEach(card => {
+      this.updateSingleKPICard(sheet, card, kpis[card.kpi], targets[card.kpi]);
+    });
+  }
+
+  // 階層別集計ビュー作成
+  createHierarchicalViews() {
+    // カテゴリビュー
+    this.createCategoryView();
+    // 仕入先ビュー
+    this.createSupplierView();
+    // SKUビュー
+    this.createSKUView();
+  }
+
+  // カテゴリビュー作成
+  createCategoryView() {
+    const viewSheet = this.ss.getSheetByName(SHEET_CONFIG.VIEW_CATEGORY);
+    const startDate = this.getSettingValue('B2');
+    const endDate = this.getSettingValue('C2');
+    
+    const query = `
+      =LET(
+        data, FILTER(販売履歴!A:Z, 
+                     販売履歴!A:A>=${startDate}, 
+                     販売履歴!A:A<=${endDate}),
+        QUERY(data,
+          "select Col9, sum(Col5), sum(Col12), count(Col1)
+           where Col9 is not null
+           group by Col9
+           label Col9 'カテゴリ', sum(Col5) '売上(実)', 
+                 sum(Col12) '粗利(実)', count(Col1) '件数'", 0)
+      )
+    `;
+    
+    viewSheet.getRange('A1').setFormula(query);
+    this.addTargetColumns(viewSheet, 'category');
+    this.addSparklineColumn(viewSheet);
+  }
+
+  // スパークライン追加
+  addSparklineColumn(sheet) {
+    const lastRow = sheet.getLastRow();
+    const sparklineCol = sheet.getLastColumn() + 1;
+    
+    for (let row = 2; row <= lastRow; row++) {
+      const sku = sheet.getRange(row, 1).getValue();
+      const sparklineFormula = `
+        =SPARKLINE(
+          QUERY(販売履歴!A:E,
+            "select A,sum(E) 
+             where A>=date '"&TEXT(TODAY()-6,"yyyy-mm-dd")&
+            "' and C='"&${sku}&"' 
+             group by A order by A", 0),
+          {"charttype","line";"linewidth",2;"color","#4285f4"}
+        )
+      `;
+      sheet.getRange(row, sparklineCol).setFormula(sparklineFormula);
+    }
+  }
+
+  // アラート抽出
+  extractAlerts() {
+    const alerts = {
+      stockOut: this.getStockOutAlerts(),
+      badInventory: this.getBadInventoryAlerts(),
+      salesVolatility: this.getSalesVolatilityAlerts(),
+      priceCompetition: this.getPriceCompetitionAlerts()
+    };
+    
+    this.displayAlerts(alerts);
+  }
+
+  // 急激な売上変動検知
+  getSalesVolatilityAlerts() {
+    const query = `
+      =FILTER({SKU列, 今週売上列, 前週売上列, 変動率列},
+              ABS((今週売上列-前週売上列)/前週売上列) >= 0.3,
+              今週売上列 >= 10000)
+    `;
+    return this.executeQuery(query);
+  }
+}
+```
+
+#### 段階的更新システム
+```javascript
+class IncrementalUpdater {
+  constructor() {
+    this.lastUpdate = PropertiesService.getScriptProperties()
+                        .getProperty('lastUpdateTime');
+  }
+
+  // 15分毎の更新
+  criticalUpdate() {
+    // 売上・在庫切れのみ更新
+    const updates = ['revenue', 'stockAlerts'];
+    this.updateMetrics(updates);
+    this.logUpdate('critical', updates);
+  }
+
+  // 1時間毎の更新
+  hourlyUpdate() {
+    // 中間指標の更新
+    const updates = ['grossProfit', 'turnover', 'returnRate'];
+    this.updateMetrics(updates);
+    this.logUpdate('hourly', updates);
+  }
+
+  // 日次完全更新
+  dailyFullUpdate() {
+    // 全KPIの再計算
+    const calculator = new KPICalculator();
+    calculator.recalculateAll();
+    this.logUpdate('daily', 'all');
+  }
+
+  // 増分データ取得
+  getIncrementalData() {
+    const newData = this.fetchDataSince(this.lastUpdate);
+    if (newData.length > 0) {
+      this.appendToSheet('販売履歴_増分', newData);
+      this.updateAffectedKPIs(newData);
+    }
+  }
+}
+```
 ```javascript
 class SheetManager {
   // 既存のメソッド...
@@ -953,7 +1160,7 @@ class SheetManager {
 }
 ```
 
-### 7.3 onEditトリガー処理の詳細設計
+### 7.4 onEditトリガー処理の詳細設計
 ```javascript
 // onEditトリガーハンドラー
 function onEdit(e) {
@@ -1391,9 +1598,139 @@ class ChartStyleManager {
           greenTo: 120,
           max: 120,
           min: 0,
-          majorTicks: ['0%', '20%', '40%', '60%', '80%', '100%', '120%']
+          majorTicks: ['0%', '50%', '100%']
         }
       }
+    };
+  }
+}
+```
+
+## 11. MVP版実装計画詳細
+
+### Day 1: 基本構造構築
+```javascript
+// 1. 新規シート作成
+function createMVPSheets() {
+  const sheets = [
+    {name: 'ダッシュボード', headers: createDashboardHeaders()},
+    {name: 'plan_monthly_input', headers: createPlanHeaders()},
+    {name: 'ビュー_カテゴリ', headers: createViewHeaders()},
+    {name: 'ビュー_仕入先', headers: createViewHeaders()},
+    {name: 'ビュー_SKU', headers: createViewHeaders()}
+  ];
+  
+  sheets.forEach(sheetConfig => {
+    createSheet(sheetConfig.name, sheetConfig.headers);
+  });
+}
+
+// 2. KPIカード実装（8枚）
+function setupKPICards() {
+  const dashboard = ss.getSheetByName('ダッシュボード');
+  const kpiFormulas = {
+    revenue: '=SUMIFS(販売履歴!E:E,販売履歴!A:A,">="&設定!B2,販売履歴!A:A,"<="&設定!C2)',
+    grossProfit: '=SUMIFS(販売履歴!L:L,販売履歴!A:A,">="&設定!B2,販売履歴!A:A,"<="&設定!C2)',
+    profitMargin: '=IF(B3=0,0,B4/B3)',
+    inventoryTurnover: '=B3/AVERAGE(在庫一覧!E:E)',
+    dio: '=365/B6',
+    returnRate: '=COUNTIFS(販売履歴!N:N,"RETURN",販売履歴!A:A,">="&設定!B2)/COUNTIFS(販売履歴!A:A,">="&設定!B2)',
+    ccc: '=B7+0-30',
+    newProductRate: '=COUNTIFS(ASIN/SKUマスタ!I:I,">="&EOMONTH(TODAY(),-1)+1)/COUNTA(ASIN/SKUマスタ!A:A)'
+  };
+  
+  // カード配置とフォーマット設定
+  setupCardLayout(dashboard, kpiFormulas);
+}
+```
+
+### Day 2: 階層ビュー実装
+```javascript
+// カテゴリビューQUERY
+const categoryQuery = `
+=LET(
+  salesData, FILTER(販売履歴!A:Z, 
+    販売履歴!A:A>=設定!B2, 
+    販売履歴!A:A<=設定!C2),
+  targetData, FILTER(plan_monthly_input!A:J,
+    plan_monthly_input!A:A=TEXT(設定!B2,"yyyy-mm"),
+    plan_monthly_input!B:B="category"),
+  salesSummary, QUERY(salesData,
+    "select Col9, sum(Col5), sum(Col12), count(Col1)
+     where Col9 is not null
+     group by Col9", 0),
+  HSTACK(salesSummary,
+    VLOOKUP(INDEX(salesSummary,,1), targetData, {4,5}, FALSE),
+    INDEX(salesSummary,,2)/INDEX(VLOOKUP(INDEX(salesSummary,,1), targetData, {4,5}, FALSE),,1))
+)`;
+
+// スパークライン設定
+function addSparklines(sheet) {
+  const lastRow = sheet.getLastRow();
+  for (let row = 2; row <= lastRow; row++) {
+    const formula = createSparklineFormula(sheet.getRange(row, 1).getValue());
+    sheet.getRange(row, 8).setFormula(formula);
+  }
+}
+```
+
+### Day 3: アラート・自動化
+```javascript
+// アラート抽出関数
+function setupAlerts() {
+  const alertFormulas = {
+    stockOut: '=FILTER(在庫一覧!A:Z,在庫一覧!Q:Q<=在庫一覧!R:R)',
+    badInventory: '=FILTER(在庫一覧!A:Z,在庫一覧!L:L>90)',
+    salesVolatility: createVolatilityAlertFormula(),
+    priceCompetition: createPriceAlertFormula()
+  };
+  
+  // アラートエリアに設定
+  applyAlertFormulas(alertFormulas);
+}
+
+// Apps Scriptメニュー
+function setupMVPMenu() {
+  SpreadsheetApp.getUi().createMenu('KPI')
+    .addItem('ダッシュボード更新', 'refreshDashboard')
+    .addItem('アラート表示', 'showAlertsSidebar')
+    .addItem('現在ビューをCSV出力', 'exportCurrentAsCsv')
+    .addToUi();
+}
+```
+
+### Day 4: 最適化・仕上げ
+```javascript
+// パフォーマンス最適化
+function optimizePerformance() {
+  // 1. QUERY結果のキャッシュ
+  implementQueryCache();
+  
+  // 2. 条件付き書式の最適化
+  optimizeConditionalFormats();
+  
+  // 3. 保護設定
+  protectCriticalRanges();
+  
+  // 4. 増分更新の実装
+  setupIncrementalUpdate();
+}
+```
+
+## 12. 受け入れ条件（DoD）チェックリスト
+
+| 項目 | 条件 | 確認 |
+|------|------|------|
+| KPIカード | 8種類のKPIが実績・目標・達成率・前月比付きで表示 | □ |
+| 階層表示 | カテゴリ→仕入先→SKUの3階層で予実と7日スパーク表示 | □ |
+| アラート | 4種類のアラート（在庫切れ・不良在庫・急激変動・価格競争）が抽出 | □ |
+| CSV出力 | 現在のビューをCSVファイルとして出力可能 | □ |
+| メニュー | 「KPI」メニューから主要機能にアクセス可能 | □ |
+| ログ記録 | データ連携ログに手動更新の記録が追記される | □ |
+| スライサー | カテゴリ・仕入先でのフィルタリングが動作 | □ |
+| 期間設定 | 設定シートのB2:C2の期間が反映される | □ |
+| パフォーマンス | 1万行のデータで3秒以内に表示更新 | □ |
+| エラー処理 | QUERY失敗時に代替メッセージが表示される | □ |
     };
   }
   

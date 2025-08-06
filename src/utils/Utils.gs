@@ -140,6 +140,19 @@ class DateUtils {
     const now = new Date();
     return this.formatDate(now, 'yyyy-MM');
   }
+
+  /**
+   * 日付を年月形式（YYYY-MM）で取得
+   */
+  static formatMonth(date) {
+    if (!date) return '';
+    
+    if (typeof date === 'string') {
+      date = new Date(date);
+    }
+    
+    return this.formatDate(date, 'yyyy-MM');
+  }
 }
 
 // =============================================================================

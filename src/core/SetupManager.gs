@@ -277,21 +277,24 @@ class SetupManager {
     sheet.getRange('G1').setFormula('=NOW()');
     sheet.getRange('G1').setNumberFormat('yyyy-mm-dd hh:mm:ss');
 
+    // 期間選択UI設定（F2セル）
+    this.setupPeriodSelector(sheet);
+
     // 月次KPIセクション
     sheet.getRange('A3').setValue('📊 月次KPI');
     sheet.getRange('A3').setFontSize(14).setFontWeight('bold');
     sheet.getRange('A3').setBackground('#c8e6c9');
 
     const monthlyKPIs = [
-      ['項目', '実績', '目標', '達成率', '前月比'],
-      ['売上高', '', '3,200,000', '', ''],
-      ['粗利益', '', '800,000', '', ''],
-      ['利益率', '', '25%', '', ''],
-      ['ROI', '', '30%', '', ''],
-      ['販売数', '', '600', '', ''],
-      ['在庫金額', '', '1,000,000', '', ''],
-      ['在庫回転率', '', '1.0', '', ''],
-      ['滞留在庫率', '', '10%', '', '']
+      ['項目', '実績', '目標', '達成率', '前月比', '前年同月比'],
+      ['売上高', '', '3,200,000', '', '', ''],
+      ['粗利益', '', '800,000', '', '', ''],
+      ['利益率', '', '25%', '', '', ''],
+      ['ROI', '', '30%', '', '', ''],
+      ['販売数', '', '600', '', '', ''],
+      ['在庫金額', '', '1,000,000', '', '', ''],
+      ['在庫回転率', '', '1.0', '', '', ''],
+      ['滞留在庫率', '', '10%', '', '', '']
     ];
 
     sheet.getRange(4, 1, monthlyKPIs.length, monthlyKPIs[0].length).setValues(monthlyKPIs);
@@ -316,12 +319,19 @@ class SetupManager {
     sheet.getRange('A21').setFontSize(14).setFontWeight('bold');
     sheet.getRange('A21').setBackground('#ffcdd2');
 
+    // 新機能の初期化
+    this.setupYearOverYearColumn(sheet);
+    this.setupGraphArea(sheet);
+
     // フォーマット調整
     sheet.setColumnWidth(1, 150);
     sheet.setColumnWidth(2, 120);
     sheet.setColumnWidth(3, 120);
     sheet.setColumnWidth(4, 100);
     sheet.setColumnWidth(5, 100);
+    sheet.setColumnWidth(6, 100); // F列（前年同月比）
+    sheet.setColumnWidth(7, 120);
+    sheet.setColumnWidth(8, 120);
   }
 
   /**
@@ -676,6 +686,182 @@ class SetupManager {
 
     } catch (error) {
       console.warn('データ検証設定でエラー:', error);
+    }
+  }
+
+  // =============================================================================
+  // 新機能UI設定
+  // =============================================================================
+
+  /**
+   * 期間選択UI設定
+   * F2セルにドロップダウンを設定します
+   */
+  setupPeriodSelector(sheet) {
+    try {
+      // F2セル：期間選択ラベル
+      sheet.getRange('F2').setValue('比較対象月');
+      sheet.getRange('F2').setFontWeight('bold');
+      sheet.getRange('F2').setHorizontalAlignment('right');
+      sheet.getRange('F2').setBackground('#e8f5e8');
+
+      // G2セル：期間選択ドロップダウン
+      const periodCell = sheet.getRange('G2');
+      
+      // 過去24ヶ月の期間リスト生成
+      const periods = this.generatePeriodOptions();
+      
+      // データ検証ルール設定
+      const validation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(periods, true)
+        .setAllowInvalid(false)
+        .setHelpText('比較する月を選択してください。前年同月がデフォルトです。')
+        .build();
+      
+      periodCell.setDataValidation(validation);
+      
+      // スタイリング
+      periodCell.setFontSize(12);
+      periodCell.setHorizontalAlignment('center');
+      periodCell.setBorder(true, true, true, true, true, true, '#cccccc', SpreadsheetApp.BorderStyle.SOLID);
+      periodCell.setBackground('#f8f9fa');
+      
+      // デフォルト値設定（前年同月）
+      const defaultPeriod = periods.find(p => p.includes('前年同月')) || periods[12];
+      periodCell.setValue(defaultPeriod);
+
+      console.log('期間選択UIを設定しました');
+
+    } catch (error) {
+      console.error('期間選択UI設定エラー:', error);
+      ErrorHandler.handleError(error, 'SetupManager.setupPeriodSelector');
+    }
+  }
+
+  /**
+   * 期間オプション生成
+   * @returns {Array} 期間選択肢の配列
+   */
+  generatePeriodOptions() {
+    const options = [];
+    const currentDate = new Date();
+    
+    for (let i = 1; i <= 24; i++) {
+      const targetDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const year = targetDate.getFullYear();
+      const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
+      
+      // 前年同月の特定
+      const isPreviousYear = (i === 12);
+      const display = `${year}年${month}月${isPreviousYear ? ' (前年同月)' : ''}`;
+      
+      options.push(display);
+    }
+    
+    return options;
+  }
+
+  /**
+   * グラフエリア設定
+   * G列以降にグラフ配置エリアを準備します
+   */
+  setupGraphArea(sheet) {
+    try {
+      // グラフエリアのタイトル設定
+      sheet.getRange('H3').setValue('📊 時系列分析グラフ');
+      sheet.getRange('H3').setFontSize(14).setFontWeight('bold');
+      sheet.getRange('H3').setBackground('#e1f5fe');
+      sheet.getRange('H3:M3').merge();
+
+      // トレンドグラフエリア（H5:N15）
+      const trendArea = sheet.getRange('H5:N15');
+      trendArea.setBorder(true, true, true, true, true, true, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
+      sheet.getRange('H5').setValue('売上・利益推移グラフ');
+      sheet.getRange('H5').setFontWeight('bold');
+      sheet.getRange('H5').setBackground('#f5f5f5');
+
+      // 比較グラフエリア（H17:N27）
+      const comparisonArea = sheet.getRange('H17:N27');
+      comparisonArea.setBorder(true, true, true, true, true, true, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
+      sheet.getRange('H17').setValue('前年同月比較グラフ');
+      sheet.getRange('H17').setFontWeight('bold');
+      sheet.getRange('H17').setBackground('#f5f5f5');
+
+      // ゲージチャートエリア（H29:N35）
+      const gaugeArea = sheet.getRange('H29:N35');
+      gaugeArea.setBorder(true, true, true, true, true, true, '#e0e0e0', SpreadsheetApp.BorderStyle.SOLID);
+      sheet.getRange('H29').setValue('目標達成率ゲージ');
+      sheet.getRange('H29').setFontWeight('bold');
+      sheet.getRange('H29').setBackground('#f5f5f5');
+
+      // グラフ更新ボタン用セル
+      sheet.getRange('H37').setValue('🔄 グラフ更新');
+      sheet.getRange('H37').setFontWeight('bold');
+      sheet.getRange('H37').setBackground('#4285f4');
+      sheet.getRange('H37').setFontColor('#ffffff');
+      sheet.getRange('H37').setHorizontalAlignment('center');
+
+      console.log('グラフエリアを設定しました');
+
+    } catch (error) {
+      console.error('グラフエリア設定エラー:', error);
+      ErrorHandler.handleError(error, 'SetupManager.setupGraphArea');
+    }
+  }
+
+  /**
+   * 前年同月比列のフォーマット設定
+   * F列に前年同月比表示の設定を行います
+   */
+  setupYearOverYearColumn(sheet) {
+    try {
+      // F列ヘッダー設定
+      const headerCell = sheet.getRange('F4');
+      headerCell.setValue('前年同月比');
+      headerCell.setFontWeight('bold');
+      headerCell.setHorizontalAlignment('center');
+      headerCell.setBackground('#e1f5fe');
+
+      // F列の範囲設定（F5:F12）
+      const yoyRange = sheet.getRange('F5:F12');
+      
+      // 初期値設定
+      yoyRange.setValue('－');
+      
+      // パーセント表示フォーマット
+      yoyRange.setNumberFormat('0.0%');
+      
+      // 中央揃え
+      yoyRange.setHorizontalAlignment('center');
+      
+      // 条件付き書式設定（正の値：緑、負の値：赤）
+      const positiveRule = SpreadsheetApp.newConditionalFormatRule()
+        .setRanges([yoyRange])
+        .whenNumberGreaterThan(0)
+        .setBackground('#d9ead3')
+        .setFontColor('#137333')
+        .build();
+        
+      const negativeRule = SpreadsheetApp.newConditionalFormatRule()
+        .setRanges([yoyRange])
+        .whenNumberLessThan(0)
+        .setBackground('#fce5cd')
+        .setFontColor('#cc0000')
+        .build();
+      
+      const existingRules = sheet.getConditionalFormatRules();
+      existingRules.push(positiveRule);
+      existingRules.push(negativeRule);
+      sheet.setConditionalFormatRules(existingRules);
+
+      // 列幅調整
+      sheet.setColumnWidth(6, 100); // F列
+
+      console.log('前年同月比列のフォーマットを設定しました');
+
+    } catch (error) {
+      console.error('前年同月比列設定エラー:', error);
+      ErrorHandler.handleError(error, 'SetupManager.setupYearOverYearColumn');
     }
   }
 

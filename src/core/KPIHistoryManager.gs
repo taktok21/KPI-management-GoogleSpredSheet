@@ -361,6 +361,146 @@ class KPIHistoryManager {
     
     return ((current - previous) / previous) * 100;
   }
+
+  /**
+   * 時系列データの効率的な取得
+   * @param {string} startMonth - 開始月（YYYY-MM形式）
+   * @param {string} endMonth - 終了月（YYYY-MM形式）
+   * @param {Array} metrics - 取得するメトリクス配列
+   * @returns {Array} 時系列データ
+   */
+  getTimeSeriesData(startMonth, endMonth, metrics = ['revenue', 'grossProfit']) {
+    try {
+      const sheet = this.getHistorySheet();
+      if (!sheet) {
+        return [];
+      }
+      
+      const lastRow = sheet.getLastRow();
+      if (lastRow <= 1) {
+        return [];
+      }
+      
+      const data = sheet.getRange(1, 1, lastRow, 14).getValues();
+      const headers = data[0];
+      
+      // インデックスマッピング作成
+      const indexMap = {};
+      headers.forEach((header, index) => {
+        switch(header) {
+          case '年月': indexMap['yearMonth'] = index; break;
+          case '売上高': indexMap['revenue'] = index; break;
+          case '粗利益': indexMap['grossProfit'] = index; break;
+          case '利益率(%)': indexMap['profitMargin'] = index; break;
+          case 'ROI(%)': indexMap['roi'] = index; break;
+          case '販売数': indexMap['salesQuantity'] = index; break;
+          case '在庫金額': indexMap['inventoryValue'] = index; break;
+          case '在庫回転率': indexMap['inventoryTurnover'] = index; break;
+          case '滞留在庫率(%)': indexMap['stagnantInventoryRate'] = index; break;
+          case '取扱商品数': indexMap['uniqueProducts'] = index; break;
+          case '平均注文額': indexMap['averageOrderValue'] = index; break;
+          case '利益目標達成率(%)': indexMap['profitGoalAchievement'] = index; break;
+          case '計算日時': indexMap['calculatedAt'] = index; break;
+          case '作成日時': indexMap['createdAt'] = index; break;
+        }
+      });
+      
+      // 期間フィルタリング
+      const filteredData = data.slice(1).filter(row => {
+        const yearMonth = row[indexMap['yearMonth']];
+        return yearMonth >= startMonth && yearMonth <= endMonth;
+      });
+      
+      // メトリクス抽出
+      return filteredData.map(row => {
+        const result = { yearMonth: row[indexMap['yearMonth']] };
+        metrics.forEach(metric => {
+          if (indexMap[metric] !== undefined) {
+            result[metric] = row[indexMap[metric]] || 0;
+          }
+        });
+        return result;
+      }).sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
+      
+    } catch (error) {
+      ErrorHandler.handleError(error, 'KPIHistoryManager.getTimeSeriesData');
+      return [];
+    }
+  }
+
+  /**
+   * キャッシュ機能付きデータ取得
+   * @param {string} cacheKey - キャッシュキー
+   * @param {Function} dataFunction - データ取得関数
+   * @param {number} expireMinutes - キャッシュ有効期限（分）
+   * @returns {*} データ
+   */
+  getCachedHistoricalData(cacheKey, dataFunction, expireMinutes = 30) {
+    try {
+      const cached = this.cache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+      
+      const data = dataFunction();
+      this.cache.set(cacheKey, data, expireMinutes * 60);
+      return data;
+      
+    } catch (error) {
+      ErrorHandler.handleError(error, 'KPIHistoryManager.getCachedHistoricalData');
+      return dataFunction();
+    }
+  }
+
+  /**
+   * 前年同月のKPIデータを取得
+   * @param {string} currentMonth - 現在月（YYYY-MM形式）
+   * @returns {Object|null} 前年同月のKPIデータ
+   */
+  getPreviousYearKPI(currentMonth) {
+    try {
+      const [year, month] = currentMonth.split('-');
+      const previousYear = (parseInt(year) - 1).toString();
+      const previousYearMonth = `${previousYear}-${month}`;
+      
+      return this.getMonthKPI(previousYearMonth);
+      
+    } catch (error) {
+      ErrorHandler.handleError(error, 'KPIHistoryManager.getPreviousYearKPI');
+      return null;
+    }
+  }
+
+  /**
+   * 指定月から過去N年分のデータを取得
+   * @param {string} baseMonth - 基準月（YYYY-MM形式）
+   * @param {number} years - 取得年数
+   * @returns {Array} 過去N年分のデータ
+   */
+  getMultiYearData(baseMonth, years = 3) {
+    const cacheKey = `multi_year_${baseMonth}_${years}`;
+    
+    return this.getCachedHistoricalData(cacheKey, () => {
+      const data = [];
+      const [baseYear, month] = baseMonth.split('-');
+      
+      for (let i = 0; i < years; i++) {
+        const targetYear = (parseInt(baseYear) - i).toString();
+        const targetMonth = `${targetYear}-${month}`;
+        const kpiData = this.getMonthKPI(targetMonth);
+        
+        if (kpiData) {
+          data.push({
+            ...kpiData,
+            yearOffset: i,
+            label: i === 0 ? '当年' : `${i}年前`
+          });
+        }
+      }
+      
+      return data;
+    }, 60); // 1時間キャッシュ
+  }
 }
 
 // =============================================================================
